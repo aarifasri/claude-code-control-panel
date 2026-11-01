@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Control Panel</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Claude Code Control Panel</h1>
+    <span class="scope" title="Project scope arrives in milestone M7">Scope: User (all projects)</span>
+    <button id="refresh" type="button">Refresh</button>
+  </header>
+
+  <p id="summary" class="summary" aria-live="polite">Loading…</p>
+
+  <nav class="tabs" role="tablist" aria-label="Item types">
+    <button role="tab" data-tab="plugin" aria-selected="true">Plugins <span class="count"></span></button>
+    <button role="tab" data-tab="skill" aria-selected="false">Skills <span class="count"></span></button>
+    <button role="tab" data-tab="agent" aria-selected="false">Agents <span class="count"></span></button>
+    <button role="tab" data-tab="mcp" aria-selected="false">MCP servers <span class="count"></span></button>
+  </nav>
+
+  <div class="filters">
+    <label class="search">
+      <span class="visually-hidden">Search</span>
+      <input id="search" type="search" placeholder="Search name or description…" autocomplete="off">
+    </label>
+    <label>State
+      <select id="f-state">
+        <option value="">All</option><option value="on">On</option><option value="off">Off</option>
+        <option value="blocked">Blocked</option><option value="partial">Partial</option>
+      </select>
+    </label>
+    <label>Source
+      <select id="f-source"><option value="">All</option><option value="standalone">Standalone</option></select>
+    </label>
+    <label>Sort
+      <select id="sort"><option value="name">Name</option><option value="cost">Token cost</option></select>
+    </label>
+  </div>
+
+  <main class="layout">
+    <section class="list" aria-label="Items">
+      <table>
+        <thead><tr><th scope="col">State</th><th scope="col">Name</th><th scope="col">Source</th><th scope="col">Scope</th><th scope="col" class="num" title="Tokens added to every session">Always-on</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty" class="empty" hidden></p>
+    </section>
+    <aside id="detail" class="detail" aria-label="Details" aria-live="polite">
+      <p class="muted">Select an item to see what it does.</p>
+    </aside>
+  </main>
+
+  <div id="error" class="error" role="alert" hidden></div>
+</body>
+</html>

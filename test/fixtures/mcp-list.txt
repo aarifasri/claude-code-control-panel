@@ -1,0 +1,25 @@
+Checking MCP server health…
+
+claude.ai Claude Docs: https://api.anthropic.com/v1/pages/mcp - ✔ Connected
+claude.ai Gmail: https://gmailmcp.googleapis.com/mcp/v1 - ✔ Connected
+plugin:ecc:chrome-devtools: npx -y chrome-devtools-mcp@1.10.1 - ✔ Connected
+plugin:design:slack: https://mcp.slack.com/mcp (HTTP) - ! Needs authentication
+plugin:design:figma: https://mcp.figma.com/mcp (HTTP) - ! Needs authentication
+plugin:design:linear: https://mcp.linear.app/mcp (HTTP) - ! Needs authentication
+plugin:design:atlassian: https://mcp.atlassian.com/v1/mcp (HTTP) - ! Needs authentication
+plugin:design:notion: https://mcp.notion.com/mcp (HTTP) - ! Needs authentication
+plugin:design:intercom: https://mcp.intercom.com/mcp (HTTP) - ! Needs authentication
+plugin:design:google calendar:  (HTTP) - - Not configured
+plugin:design:gmail:  (HTTP) - - Not configured
+plugin:engineering:datadog: https://mcp.datadoghq.com/api/unstable/mcp-server/mcp (HTTP) - ! Needs authentication
+plugin:engineering:google calendar:  (HTTP) - - Not configured
+plugin:engineering:gmail:  (HTTP) - - Not configured
+plugin:data:snowflake:  (HTTP) - - Not configured
+plugin:data:databricks:  (HTTP) - - Not configured
+plugin:data:hex: https://app.hex.tech/mcp (HTTP) - ! Needs authentication
+plugin:data:amplitude: https://mcp.amplitude.com/mcp (HTTP) - ! Needs authentication
+plugin:data:amplitude-eu: https://mcp.eu.amplitude.com/mcp (HTTP) - ! Needs authentication
+plugin:data:definite: https://api.definite.app/v3/mcp/http (HTTP) - ✘ Failed to connect — MCP endpoint not found at https://api.definite.app. Check the URL in your MCP config.
+playwright: npx @playwright/mcp@latest - ✔ Connected
+aws-mcp: uvx mcp-proxy-for-aws@latest https://aws-mcp.us-east-1.api.aws/mcp --metadata INSTALL_SOURCE=aws-cli - ✘ Failed to connect — MCP server "aws-mcp" connection timed out after 30000ms
+rea: cmd.exe /d /c npx -y rea-agents@6.7.0 mcp - ✔ Connected

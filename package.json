@@ -1,0 +1,22 @@
+{
+  "name": "claude-control-panel",
+  "version": "0.1.0",
+  "description": "Local web app to view and manage Claude Code plugins, skills, agents, MCP servers and hooks",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  }
+}

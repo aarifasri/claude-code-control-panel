@@ -1,0 +1,26 @@
+design 1.2.0
+  Description: Accelerate design workflows — critique, design system management, UX writing, accessibility audits, research synthesis, and dev handoff. From exploration to pixel-perfect specs.
+  Source: design@synced
+
+Component inventory
+  Skills (7)  accessibility-review, design-critique, design-handoff, design-system, research-synthesis, user-research, ux-copy
+  Agents (0)
+  Hooks (0)
+  MCP servers (9)  slack, figma, linear, asana, atlassian, notion, intercom, google calendar, gmail  (tool schemas resolved at runtime; not counted)
+  LSP servers (0)
+
+Projected token cost
+  Always-on:   ~619 tok   added to every session
+
+Per-component (rounded)
+  component             always-on  on-invoke
+  accessibility-review        ~90      ~1.5k
+  design-critique             ~90      ~1.4k
+  design-handoff              ~80      ~1.4k
+  design-system               ~90        ~2k
+  research-synthesis          ~90        ~1k
+  user-research               ~80       ~570
+  ux-copy                     ~90      ~1.2k
+
+  On-invoke cost is paid each time a skill or agent fires.
+  Token counts are estimates and may differ from actual usage.
