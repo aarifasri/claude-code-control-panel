@@ -11,6 +11,8 @@ export interface FoundComponent {
   description: string;
   path: string;
   warnings: string[];
+  /** Frontmatter `user-invocable: false`: hidden from the / menu (and from Claude Code's init skill list). */
+  hiddenFromMenu?: boolean;
 }
 
 async function isDir(p: string): Promise<boolean> {
@@ -51,7 +53,10 @@ async function readSkillFolder(folder: string): Promise<FoundComponent> {
   const key = basename(folder);
   const md = await readMarkdown(join(folder, 'SKILL.md'));
   const warnings = md.frontmatterError ? [...md.warnings, md.frontmatterError] : md.warnings;
-  return { key, name: stringField(md.data, 'name') ?? key, description: description(md), path: folder, warnings };
+  return {
+    key, name: stringField(md.data, 'name') ?? key, description: description(md), path: folder, warnings,
+    ...(md.data['user-invocable'] === false ? { hiddenFromMenu: true } : {}),
+  };
 }
 
 /**

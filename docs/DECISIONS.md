@@ -2,6 +2,21 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-013 · Token on every API call; plugin list cached; Verify understands hidden skills (2026-11-01)
+- **Security gap found while building Verify:**
+  - GET endpoints only checked the Host header. Any website could make the browser fire `GET /api/costs`, `/api/mcp` and so on with an `<img>` tag. It couldn't read the reply, but it **started `claude` processes** on this machine.
+  - Now **every `/api/` request needs the page token**. A cross-site page can't add a custom header without a CORS preflight, which is never approved.
+  - Verify is a POST with the full write checks, because it starts a Claude Code session.
+- **Plugin list cache:** `claude plugin list` (2–3 s) is cached for 15 s per folder, and simultaneous calls share one result.
+  - The cache is cleared after a plugin change and on Refresh (`?fresh=1`).
+  - Inventory now takes 0.7–0.9 s instead of 2.3–3.0 s.
+- **Verify:**
+  - It runs `claude -p` with `--no-session-persistence` and hooks disabled, and stops at the `init` event.
+  - The first real run reported 6 "differences", all explained:
+    - Three skills have `user-invocable: false`. Claude Code loads them for the model but omits them from `init.skills`, so they're now counted as *not checkable*.
+    - Three `…@builtin` plugins are Claude Code's own, and `plugin list` hides them. They're now listed separately.
+  - The re-run reported **0 differences** across 18 plugins, 717 skills and 409 agents.
+
 ## D-012 · Hooks are view-only except the master switch; MCP remove goes through the CLI (2026-11-01)
 - **Hooks:**
   - Listed from every settings layer, plus each plugin's `hooks/hooks.json`. Each handler becomes one view-only item, with secrets in commands masked.

@@ -75,6 +75,9 @@ dialog h2 { font-size: 16px; margin: 0 0 8px; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .dialog-buttons button:not(.danger) { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 .small { font-size: 12px; margin: 6px 0 0; }
+.verify { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.verify ul { margin: 6px 0; padding-left: 20px; max-height: 240px; overflow: auto; }
+.verify p { margin: 0 0 6px; }
 .restart { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--warn); border-radius: 8px; color: var(--warn); }
 .toast { position: fixed; right: 16px; bottom: 16px; max-width: min(520px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 24px rgb(0 0 0 / .25); overflow-wrap: anywhere; }
 .toast { display: flex; gap: 12px; align-items: center; }

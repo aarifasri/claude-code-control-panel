@@ -15,19 +15,21 @@
     <label class="scope">Scope
       <select id="scope"><option value="">User (all projects)</option></select>
     </label>
+    <button id="verify" type="button">Verify with Claude Code</button>
     <button id="refresh" type="button">Refresh</button>
   </header>
+  <section id="verify-result" class="verify" aria-live="polite" hidden></section>
 
   <p id="summary" class="summary" aria-live="polite">Loading…</p>
   <p id="restart" class="restart" hidden>Changes saved. <strong>Restart Claude Code sessions</strong> (or start a new one) for them to take effect.</p>
 
   <nav class="tabs" role="tablist" aria-label="Item types">
-    <button role="tab" data-tab="plugin" aria-selected="true">Plugins <span class="count"></span></button>
-    <button role="tab" data-tab="skill" aria-selected="false">Skills <span class="count"></span></button>
-    <button role="tab" data-tab="agent" aria-selected="false">Agents <span class="count"></span></button>
-    <button role="tab" data-tab="mcp" aria-selected="false">MCP servers <span class="count"></span></button>
-    <button role="tab" data-tab="hook" aria-selected="false">Hooks <span class="count"></span></button>
-    <button role="tab" data-tab="trash" aria-selected="false">Trash <span class="count"></span></button>
+    <button role="tab" id="tab-plugin" aria-controls="panel" data-tab="plugin" aria-selected="true">Plugins <span class="count"></span></button>
+    <button role="tab" id="tab-skill" aria-controls="panel" data-tab="skill" aria-selected="false">Skills <span class="count"></span></button>
+    <button role="tab" id="tab-agent" aria-controls="panel" data-tab="agent" aria-selected="false">Agents <span class="count"></span></button>
+    <button role="tab" id="tab-mcp" aria-controls="panel" data-tab="mcp" aria-selected="false">MCP servers <span class="count"></span></button>
+    <button role="tab" id="tab-hook" aria-controls="panel" data-tab="hook" aria-selected="false">Hooks <span class="count"></span></button>
+    <button role="tab" id="tab-trash" aria-controls="panel" data-tab="trash" aria-selected="false">Trash <span class="count"></span></button>
   </nav>
 
   <div class="filters">
@@ -49,7 +51,7 @@
     </label>
   </div>
 
-  <main class="layout">
+  <main class="layout" id="panel" role="tabpanel">
     <section class="list" aria-label="Items">
       <table>
         <thead><tr><th scope="col">State</th><th scope="col">Name</th><th scope="col">Source</th><th scope="col">Scope</th><th scope="col" class="num" title="Tokens added to every session">Always-on</th></tr></thead>

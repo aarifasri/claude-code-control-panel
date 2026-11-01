@@ -93,6 +93,12 @@ test('command without frontmatter uses its first line as description, without wa
   assert.deepEqual(cmd?.warnings, []);
 });
 
+test('user-invocable: false is recorded as hiddenFromMenu', async () => {
+  const home = await fakeTree({ '.claude/skills/quiet/SKILL.md': '---\ndescription: d\nuser-invocable: false\n---\n' });
+  const { items } = await buildInventory({ home, cli: fakeCli({ 'plugin list --json': { stdout: '[]' } }) });
+  assert.equal(items.find((i) => i.id === 'skill:user:quiet')?.hiddenFromMenu, true);
+});
+
 test('skill without frontmatter still warns, but gets a first-line description', async () => {
   const home = await fakeTree({ '.claude/skills/nofm/SKILL.md': 'Use this when testing.\n' });
   const { items } = await buildInventory({ home, cli: fakeCli({ 'plugin list --json': { stdout: '[]' } }) });

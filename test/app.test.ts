@@ -11,6 +11,7 @@ import type { ClaudeCli } from '../src/adapters/cli.ts';
 import { fakeCli, fakeTree, md } from './helpers.ts';
 
 const TOKEN = 'test-token-123';
+const get = (url: string) => fetch(url, { headers: { 'X-CCP-Token': TOKEN } });
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
@@ -42,7 +43,7 @@ async function start(cli?: ClaudeCli) {
 test('page embeds the token; APIs never return it', async () => {
   const { base } = await start();
   assert.match(await (await fetch(base)).text(), new RegExp(`content="${TOKEN}"`));
-  assert.doesNotMatch(await (await fetch(`${base}/api/inventory`)).text(), new RegExp(TOKEN));
+  assert.doesNotMatch(await (await get(`${base}/api/inventory`)).text(), new RegExp(TOKEN));
 });
 
 test('write without the token → 403 (AC-5)', async () => {
@@ -52,6 +53,37 @@ test('write without the token → 403 (AC-5)', async () => {
   assert.equal((await res.json()).error.code, 'bad-token');
   const wrong = await post({ itemId: 'skill:user:s1', action: 'disable' }, { 'X-CCP-Token': 'nope' });
   assert.equal(wrong.status, 403);
+});
+
+test('every API read also needs the token (other sites must not be able to start claude processes)', async () => {
+  const { base } = await start();
+  for (const path of ['/api/inventory', '/api/costs', '/api/mcp', '/api/trash', '/api/projects']) {
+    const res = await fetch(`${base}${path}`);
+    assert.equal(res.status, 403, path);
+  }
+  assert.equal((await fetch(base)).status, 200, 'the page itself needs no token');
+});
+
+test('verify: compares the inventory with what Claude Code loaded', async () => {
+  const cli = fakeCli({ 'plugin list --json': { stdout: '[]' } });
+  const inits: string[] = [];
+  const withInit: ClaudeCli = {
+    run: cli.run,
+    async init(cwd) {
+      inits.push(cwd);
+      return { skills: [], slash_commands: [], agents: ['Helper Agent'], plugins: [{ name: 'x', source: 'x@m' }], mcp_servers: [] };
+    },
+  };
+  const { base, home } = await start(withInit);
+  const res = await fetch(`${base}/api/verify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, 'X-CCP-Token': TOKEN }, body: '{}',
+  });
+  assert.equal(res.status, 200);
+  const report = await res.json();
+  assert.deepEqual(inits, [home], 'user view probes from the home folder');
+  const summary = report.mismatches.map((m: { name: string; app: string; claude: string }) => `${m.name}:${m.app}->${m.claude}`).sort();
+  assert.deepEqual(summary, ['s1:on->not loaded', 'x@m:not in the list->loaded']);
+  assert.equal((await fetch(`${base}/api/verify`, { method: 'POST', headers: { 'X-CCP-Token': TOKEN } })).status, 403, 'needs Origin too');
 });
 
 test('write from another origin → 403, even with the token', async () => {
@@ -135,9 +167,9 @@ test('delete a skill to trash, list it, restore it (end to end)', async () => {
   assert.equal(body.item, null);
   assert.ok(body.trashEntry.id);
 
-  const inv = await (await fetch(`${base}/api/inventory`)).json();
+  const inv = await (await get(`${base}/api/inventory`)).json();
   assert.equal(inv.items.some((i: { id: string }) => i.id === 'skill:user:s1'), false);
-  const trash = await (await fetch(`${base}/api/trash`)).json();
+  const trash = await (await get(`${base}/api/trash`)).json();
   assert.equal(trash.entries.length, 1);
 
   const restored = await (await post({ itemId: `trash:${body.trashEntry.id}`, action: 'restore' })).json();
@@ -205,7 +237,7 @@ test('plugin CLI failure is reported with its message and nothing changes', asyn
   const res = await post({ itemId: 'plugin:user:fd@official', action: 'disable' });
   assert.equal(res.status, 500);
   assert.match((await res.json()).error.message, /exit 1.*not found in user scope/);
-  const inv = await (await fetch(`${base}/api/inventory`)).json();
+  const inv = await (await get(`${base}/api/inventory`)).json();
   assert.equal(inv.items.find((i: { id: string }) => i.id === 'plugin:user:fd@official').state, 'on');
 });
 

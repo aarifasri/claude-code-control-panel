@@ -48,6 +48,8 @@ export interface Item {
   warnings: string[];
   /** Plugins only: counts of what they contain. */
   contents?: { skills: number; agents: number; commands: number };
+  /** Skill with `user-invocable: false`: Claude can use it, but it isn't in the / menu. */
+  hiddenFromMenu?: boolean;
 }
 
 /** One parsed settings file. `data` is null when the file is missing. */

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { readClaudeJsonSummary } from './adapters/claudeJson.ts';
 import { CliError, listPlugins, type ClaudeCli, type InstalledPlugin } from './adapters/cli.ts';
 import type { ActionName } from './domain/types.ts';
+import { compareWithInit } from './domain/verify.ts';
 import { listTrash, TrashError } from './adapters/trash.ts';
 import { executeAction, restoreAction, trashOptions } from './services/actions.ts';
 import { getCosts } from './services/costs.ts';
@@ -93,13 +94,36 @@ export function createApp(config: AppConfig) {
     if (!allowedHosts().includes(req.headers.host ?? '')) throw new HttpError(403, 'bad-host', 'Requests must come from this computer.');
   }
 
+  /**
+   * Every API call needs the page token. Other websites can make the browser send simple GETs here
+   * (e.g. an <img> tag); they can't read the answer, but /api/costs, /api/mcp and /api/verify start
+   * `claude` processes. A custom header can't be added cross-site without a CORS preflight, which we
+   * never approve, so requiring it blocks those requests.
+   */
+  function checkToken(req: IncomingMessage): void {
+    const given = req.headers['x-ccp-token'];
+    if (typeof given !== 'string' || !sameSecret(given, token)) throw new HttpError(403, 'bad-token', 'Missing or wrong page token. Reload the page.');
+  }
+
   /** Every write must come from our own page (NFR-S2): right Origin, JSON body, and the page token. */
   function checkWriteRequest(req: IncomingMessage): void {
     const origin = req.headers.origin ?? '';
     if (!allowedHosts().some((h) => origin === `http://${h}`)) throw new HttpError(403, 'bad-origin', 'Changes can only be made from the control panel page.');
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw new HttpError(400, 'invalid-request', 'Content-Type must be application/json');
-    const given = req.headers['x-ccp-token'];
-    if (typeof given !== 'string' || !sameSecret(given, token)) throw new HttpError(403, 'bad-token', 'Missing or wrong page token. Reload the page.');
+    checkToken(req);
+  }
+
+  // `claude plugin list` takes 2-3 s; remember it briefly per folder, and share in-flight calls.
+  const PLUGIN_TTL_MS = 15_000;
+  const pluginCache = new Map<string, { at: number; value: Promise<InstalledPlugin[]> }>();
+  function cachedPlugins(cwd: string | undefined): Promise<InstalledPlugin[]> {
+    const k = cwd ?? '';
+    const hit = pluginCache.get(k);
+    if (hit && Date.now() - hit.at < PLUGIN_TTL_MS) return hit.value;
+    const value = listPlugins(config.cli, cwd);
+    value.catch(() => pluginCache.delete(k));
+    pluginCache.set(k, { at: Date.now(), value });
+    return value;
   }
 
   async function inventory(project: string | null, plugins?: InstalledPlugin[]) {
@@ -107,7 +131,7 @@ export function createApp(config: AppConfig) {
       home: config.home, cli: config.cli,
       ...(config.managedSettingsPath ? { managedSettingsPath: config.managedSettingsPath } : {}),
       ...(project ? { project } : {}),
-      ...(plugins ? { plugins } : {}),
+      plugins: plugins ?? (await cachedPlugins(project ?? undefined)),
     });
   }
 
@@ -139,7 +163,8 @@ export function createApp(config: AppConfig) {
     const deps = (inv?: { plugins: InstalledPlugin[] }) => ({
       cli: config.cli, home: config.home, appDir: config.appDir,
       projects: project ? [project] : [], ...(project ? { project } : {}),
-      inventory: inv ? () => inventory(project, inv.plugins) : () => inventory(project),
+      // A plugin change must re-read the plugin list: drop the cache first.
+      inventory: inv ? () => inventory(project, inv.plugins) : () => { pluginCache.clear(); return inventory(project); },
     });
 
     if (action === 'restore') {
@@ -187,6 +212,9 @@ export function createApp(config: AppConfig) {
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     checkHost(req);
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${config.getPort()}`);
+    if (url.pathname.startsWith('/api/')) checkToken(req);
+    // The Refresh button asks for fresh data.
+    if (url.searchParams.get('fresh') === '1') pluginCache.clear();
 
     if (req.method === 'GET' && url.pathname in STATIC) {
       const file = STATIC[url.pathname]!;
@@ -215,7 +243,7 @@ export function createApp(config: AppConfig) {
 
     if (req.method === 'GET' && url.pathname === '/api/costs') {
       try {
-        const plugins = await listPlugins(config.cli);
+        const plugins = await cachedPlugins(undefined);
         return json(res, 200, await getCosts({ cli: config.cli, plugins, cacheFile: join(config.appDir, 'cache', 'costs.json') }));
       } catch (e) {
         throw new HttpError(500, 'costs-failed', (e as Error).message);
@@ -226,7 +254,7 @@ export function createApp(config: AppConfig) {
       const project = await projectParam(url.searchParams.get('project'));
       try {
         const cwd = project ?? config.cwd;
-        const [plugins, summary] = await Promise.all([listPlugins(config.cli, cwd), readClaudeJsonSummary(config.home)]);
+        const [plugins, summary] = await Promise.all([cachedPlugins(project ?? undefined), readClaudeJsonSummary(config.home)]);
         return json(res, 200, await listMcp({ cli: config.cli, summary, plugins, cwd, ...(project ? { project } : {}) }));
       } catch (e) {
         throw new HttpError(500, 'mcp-failed', (e as Error).message);
@@ -238,6 +266,23 @@ export function createApp(config: AppConfig) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/actions') return handleAction(req, res);
+
+    if (req.method === 'POST' && url.pathname === '/api/verify') {
+      // POST (with the write checks) because it starts a Claude Code process.
+      checkWriteRequest(req);
+      const body = await readBody(req);
+      const project = await projectParam((body as Record<string, unknown> | null)?.project);
+      if (!config.cli.init) throw new HttpError(501, 'not-supported', 'Verification is not available.');
+      const started = Date.now();
+      let loaded;
+      try {
+        loaded = await config.cli.init(project ?? config.home);
+      } catch (e) {
+        throw new HttpError(500, 'verify-failed', (e as Error).message);
+      }
+      const inv = await inventory(project);
+      return json(res, 200, { ...compareWithInit(inv.items, loaded), durationMs: Date.now() - started, folder: project ?? config.home });
+    }
 
     throw new HttpError(404, 'not-found', 'Not found');
   }

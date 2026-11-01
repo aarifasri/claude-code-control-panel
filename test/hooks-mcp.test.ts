@@ -12,6 +12,7 @@ import { flattenHooks } from '../src/services/hooks.ts';
 import { fakeTree } from './helpers.ts';
 
 const TOKEN = 't';
+const get = (url: string) => fetch(url, { headers: { 'X-CCP-Token': TOKEN } });
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
@@ -68,7 +69,7 @@ async function start() {
     });
     return { status: res.status, body: await res.json() };
   };
-  const inventory = async () => (await (await fetch(`${base}/api/inventory`)).json()).items as { id: string; kind: string; state: string; actions: Record<string, { allowed: boolean; reason?: string }> }[];
+  const inventory = async () => (await (await get(`${base}/api/inventory`)).json()).items as { id: string; kind: string; state: string; actions: Record<string, { allowed: boolean; reason?: string }> }[];
   return { home, post, inventory, calls };
 }
 

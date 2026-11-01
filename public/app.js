@@ -12,9 +12,13 @@ const state = {
   project: '',                            // '' = user view; else a project path from /api/projects
 };
 
-/** Query string for the current view. */
-function viewQuery() {
-  return state.project ? `?project=${encodeURIComponent(state.project)}` : '';
+/** Query string for the current view; `fresh` asks the server to re-read the plugin list. */
+function viewQuery(fresh = false) {
+  const q = new URLSearchParams();
+  if (state.project) q.set('project', state.project);
+  if (fresh) q.set('fresh', '1');
+  const s = q.toString();
+  return s ? `?${s}` : '';
 }
 const $ = (sel) => document.querySelector(sel);
 const TOKEN = document.querySelector('meta[name="ccp-token"]')?.content ?? '';
@@ -94,8 +98,8 @@ function toast(message, kind = 'ok', undo = null) {
   toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 12000 : undo ? 15000 : 7000);
 }
 
-async function post(body) {
-  const res = await fetch('/api/actions', {
+async function post(body, path = '/api/actions') {
+  const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CCP-Token': TOKEN },
     body: JSON.stringify({ ...body, ...(state.project ? { project: state.project } : {}) }),
@@ -213,13 +217,14 @@ function allItems() {
 }
 
 async function getJson(url) {
-  const res = await fetch(url);
+  // Every API call carries the page token (other sites can't add this header).
+  const res = await fetch(url, { headers: { 'X-CCP-Token': TOKEN } });
   const body = await res.json();
   if (!res.ok) throw new Error(body.error?.message ?? `HTTP ${res.status}`);
   return body;
 }
 
-async function load() {
+async function load(fresh = false) {
   $('#summary').textContent = 'Loading…';
   $('#error').hidden = true;
   state.costs = state.mcp = state.costsError = state.mcpError = null;
@@ -227,7 +232,7 @@ async function load() {
   const gen = ++loadGeneration;
   const current = () => gen === loadGeneration;
   try {
-    const [items] = await Promise.all([getJson(`/api/inventory${viewQuery()}`).then((b) => b.items), loadTrash()]);
+    const [items] = await Promise.all([getJson(`/api/inventory${viewQuery(fresh)}`).then((b) => b.items), loadTrash()]);
     if (!current()) return;
     state.items = items;
     renderSourceFilter();
@@ -291,6 +296,8 @@ function render() {
   for (const tab of document.querySelectorAll('[role=tab]')) {
     const kind = tab.dataset.tab;
     tab.setAttribute('aria-selected', String(kind === state.tab));
+    tab.tabIndex = kind === state.tab ? 0 : -1; // roving tabindex: Tab enters the tab list once
+    if (kind === state.tab) $('#panel').setAttribute('aria-labelledby', tab.id);
     const loading = kind === 'mcp' && !state.mcp;
     const count = kind === 'trash' ? state.trash.length : allItems().filter((i) => i.kind === kind).length;
     tab.querySelector('.count').textContent = loading ? (state.mcpError ? '(!)' : '(…)') : `(${count})`;
@@ -365,6 +372,7 @@ function renderDetail() {
   const rows = [
     ['What it does', item.description || '(no description)'],
     ['Type', item.variant ? `${item.kind} (${item.variant})` : item.kind],
+    item.hiddenFromMenu ? ['Menu', 'Hidden from the / menu (user-invocable: false); Claude can still use it'] : null,
     ['Identifier', item.key],
     ['Source', item.origin.type === 'plugin' ? `Plugin ${item.origin.pluginId}` : sourceLabel(item)],
     ['Scope', item.scope],
@@ -408,7 +416,49 @@ for (const tab of document.querySelectorAll('[role=tab]')) {
   tab.addEventListener('click', () => { state.tab = tab.dataset.tab; state.selectedId = null; render(); });
 }
 for (const id of ['#search', '#f-state', '#f-source', '#sort']) $(id).addEventListener('input', render);
-$('#refresh').addEventListener('click', load);
+$('#refresh').addEventListener('click', () => load(true));
+
+// Verify: start Claude Code just long enough to read what it loaded, and compare (D-005).
+async function verify() {
+  const button = $('#verify');
+  const out = $('#verify-result');
+  button.disabled = true;
+  button.textContent = 'Verifying… (up to a minute)';
+  out.hidden = false;
+  fill(out, el('p', {}, 'Starting Claude Code to see what it loads. It stops before answering, with hooks off, and saves no session.'));
+  try {
+    const r = await post({}, '/api/verify');
+    const head = `Checked ${r.checked.plugins} plugins, ${r.checked.skills} skills and ${r.checked.agents} agents in ${r.folder} (${(r.durationMs / 1000).toFixed(0)} s).`;
+    const notes = [
+      r.uncheckedSkills ? `${r.uncheckedSkills} skill${r.uncheckedSkills === 1 ? ' is' : 's are'} hidden from the / menu (user-invocable: false), so Claude Code doesn't list ${r.uncheckedSkills === 1 ? 'it' : 'them'} at start-up and ${r.uncheckedSkills === 1 ? 'it' : 'they'} can't be checked this way.` : null,
+      r.builtinPlugins.length ? `Claude Code also loads its own built-in plugins: ${r.builtinPlugins.join(', ')}.` : null,
+    ].filter(Boolean);
+    fill(out,
+      el('p', {}, r.mismatches.length ? `${head} ${r.mismatches.length} difference${r.mismatches.length === 1 ? '' : 's'}:` : `${head} Everything matches what Claude Code loaded.`),
+      r.mismatches.length ? el('ul', {}, r.mismatches.slice(0, 50).map((m) => el('li', {}, `${m.kind} "${m.name}": this page says ${m.app}, Claude Code: ${m.claude}`))) : null,
+      r.mismatches.length > 50 ? el('p', { class: 'muted' }, `…and ${r.mismatches.length - 50} more.`) : null,
+      notes.map((n) => el('p', { class: 'muted small' }, n)),
+      el('button', { type: 'button', class: 'link', onclick: () => { out.hidden = true; } }, 'Close'));
+  } catch (e) {
+    fill(out, el('p', { class: 'state-blocked' }, `Verification failed: ${e.message}`));
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Verify with Claude Code';
+  }
+}
+$('#verify').addEventListener('click', verify);
+
+// Tabs follow the ARIA tab pattern: Left/Right/Home/End move between tabs.
+$('[role=tablist]').addEventListener('keydown', (e) => {
+  const tabs = [...document.querySelectorAll('[role=tab]')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i === -1) return;
+  const next = { ArrowRight: (i + 1) % tabs.length, ArrowLeft: (i - 1 + tabs.length) % tabs.length, Home: 0, End: tabs.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
+});
 
 async function loadProjects() {
   try {

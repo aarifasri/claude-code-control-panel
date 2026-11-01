@@ -72,5 +72,16 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - MCP remove looks the server up through `configuredMcpItems()` (names from `~/.claude.json`), backs up `~/.claude.json` under the label `claude-json`, then runs `claude mcp remove`.
 - `~/.claude-control-panel/backups` can contain secrets copied from `~/.claude.json`. Never serve it to the browser.
 
+## Verify and caching (M9, D-013)
+- **Every `/api/` call needs `X-CCP-Token`.** Use `getJson()` and `post()` in `app.js`. Tests use a `get()` helper.
+- `cachedPlugins(cwd)` in `app.ts` caches `claude plugin list` for 15 s. Clear the cache after anything that changes plugins.
+- `POST /api/verify` calls `cli.init(folder)` (see `INIT_ARGS` in `cli.ts`), then runs `compareWithInit()` in `src/domain/verify.ts`.
+
 ## Current status
-M0–M8 are done. **Next: M9**, "Verify with Claude Code", speed, an accessibility pass, and the validation checklist.
+**v1 is complete (M0–M9).** See [docs/VALIDATION.md](docs/VALIDATION.md) for what's verified and the known limits.
+
+Possible next steps, not planned:
+- MCP on/off
+- Deleting the empty `{}` settings file the app leaves behind
+- Profiles (saved on/off sets)
+- A screen-reader test

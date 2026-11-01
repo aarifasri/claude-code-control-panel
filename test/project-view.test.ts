@@ -11,6 +11,7 @@ import type { ClaudeCli } from '../src/adapters/cli.ts';
 import { fakeTree, md } from './helpers.ts';
 
 const TOKEN = 't';
+const get = (url: string) => fetch(url, { headers: { 'X-CCP-Token': TOKEN } });
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
@@ -47,19 +48,19 @@ async function start() {
     });
     return { status: res.status, body: await res.json() };
   };
-  const inventory = async (p?: string) => (await (await fetch(`${base}/api/inventory${p ? `?project=${encodeURIComponent(p)}` : ''}`)).json());
+  const inventory = async (p?: string) => (await (await get(`${base}/api/inventory${p ? `?project=${encodeURIComponent(p)}` : ''}`)).json());
   return { home, project, base, post, inventory, calls };
 }
 
 test('project list: known, existing folders only (home excluded)', async () => {
   const { base, project } = await start();
-  const { projects } = await (await fetch(`${base}/api/projects`)).json();
+  const { projects } = await (await get(`${base}/api/projects`)).json();
   assert.deepEqual(projects.map((p: { path: string }) => p.path), [project]);
 });
 
 test('unknown project paths are rejected, never used', async () => {
   const { base, post } = await start();
-  assert.equal((await fetch(`${base}/api/inventory?project=${encodeURIComponent('C:/Windows')}`)).status, 400);
+  assert.equal((await get(`${base}/api/inventory?project=${encodeURIComponent('C:/Windows')}`)).status, 400);
   const res = await post({ itemId: 'skill:user:user-skill', action: 'enable', project: 'C:/Windows' });
   assert.equal(res.status, 400);
   assert.equal(res.body.error.code, 'unknown-project');

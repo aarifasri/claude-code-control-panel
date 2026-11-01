@@ -64,7 +64,8 @@ function standaloneItems(
     const eff = skillState(c.key, layers);
     items.push({
       id: itemId(variant === 'command' ? 'command' : 'skill', scope, c.key, qualifier), kind: 'skill', key: c.key, name: c.name,
-      description: c.description, ...(variant ? { variant } : {}), scope, origin: { type: 'standalone' }, path: c.path,
+      description: c.description, ...(variant ? { variant } : {}), ...(c.hiddenFromMenu ? { hiddenFromMenu: true } : {}),
+      scope, origin: { type: 'standalone' }, path: c.path,
       state: eff.state, ...(eff.source ? { stateSource: eff.source } : {}), actions: {}, warnings: c.warnings,
     });
   }
@@ -126,7 +127,8 @@ async function pluginItems(p: InstalledPlugin): Promise<Item[]> {
     const key = kind === 'skill' ? `${pluginName}:${c.key}` : c.key;
     children.push({
       id: itemId(variant === 'command' ? 'command' : kind, 'plugin', key, p.id), kind, key, name: c.name, description: c.description,
-      ...(variant ? { variant } : {}), scope: 'plugin', origin: { type: 'plugin', pluginId: p.id }, path: c.path,
+      ...(variant ? { variant } : {}), ...(c.hiddenFromMenu ? { hiddenFromMenu: true } : {}),
+      scope: 'plugin', origin: { type: 'plugin', pluginId: p.id }, path: c.path,
       state: componentState, stateSource: cliSource, actions: {}, warnings: c.warnings,
     });
   };
