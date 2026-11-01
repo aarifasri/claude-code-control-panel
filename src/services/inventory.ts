@@ -7,6 +7,8 @@ import { listPlugins, type ClaudeCli, type InstalledPlugin } from '../adapters/c
 import { readJsonObject } from '../adapters/jsonFile.ts';
 import { agentState, skillState } from '../domain/effective.ts';
 import { itemId, projectHash } from '../domain/ids.ts';
+import { isAllowedSettingsFile, userSettingsPath } from '../domain/paths.ts';
+import { actionsFor } from '../domain/rules.ts';
 import type { Item, Scope, SettingsLayer, SettingsLevel } from '../domain/types.ts';
 
 export interface InventoryOptions {
@@ -17,11 +19,14 @@ export interface InventoryOptions {
   cli: ClaudeCli;
   /** Managed (enterprise) settings file, if any. Read-only. */
   managedSettingsPath?: string;
+  /** Reuse an already-fetched plugin list (skips the slow `claude plugin list` call). */
+  plugins?: InstalledPlugin[];
 }
 
 export interface Inventory {
   items: Item[];
   layers: SettingsLayer[];
+  plugins: InstalledPlugin[];
   generatedAt: string;
 }
 
@@ -133,7 +138,7 @@ async function pluginItems(p: InstalledPlugin): Promise<Item[]> {
 export async function buildInventory(opts: InventoryOptions): Promise<Inventory> {
   const layers = await readLayers(opts);
   const [plugins, userRoot, projectRoot] = await Promise.all([
-    listPlugins(opts.cli),
+    opts.plugins ? Promise.resolve(opts.plugins) : listPlugins(opts.cli),
     readRoot(join(opts.home, '.claude')),
     opts.project ? readRoot(join(opts.project, '.claude')) : Promise.resolve(undefined),
   ]);
@@ -144,7 +149,12 @@ export async function buildInventory(opts: InventoryOptions): Promise<Inventory>
   if (opts.project && projectRoot) {
     items.push(...standaloneItems('project', projectHash(opts.project), projectRoot, layers));
   }
-  for (const p of plugins) items.push(...(await pluginItems(p)));
+  for (const list of await Promise.all(plugins.map(pluginItems))) items.push(...list);
 
-  return { items, layers, generatedAt: new Date().toISOString() };
+  // Project view (M7) will target the project's settings.local.json; for now toggles go to user settings.
+  const writeScope = { home: opts.home, appDir: join(opts.home, '.claude-control-panel'), projects: opts.project ? [opts.project] : [] };
+  const ctx = { layers, targetFile: userSettingsPath(opts.home), isWritable: (f: string) => isAllowedSettingsFile(f, writeScope) };
+  for (const item of items) item.actions = actionsFor(item, ctx);
+
+  return { items, layers, plugins, generatedAt: new Date().toISOString() };
 }

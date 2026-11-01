@@ -7,8 +7,9 @@ import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readClaudeJsonSummary } from './adapters/claudeJson.ts';
-import { CliError, listPlugins, type ClaudeCli } from './adapters/cli.ts';
+import { CliError, listPlugins, type ClaudeCli, type InstalledPlugin } from './adapters/cli.ts';
 import type { ActionName } from './domain/types.ts';
+import { executeAction } from './services/actions.ts';
 import { getCosts } from './services/costs.ts';
 import { buildInventory } from './services/inventory.ts';
 import { ActionLock } from './services/lock.ts';
@@ -99,8 +100,12 @@ export function createApp(config: AppConfig) {
     if (typeof given !== 'string' || !sameSecret(given, token)) throw new HttpError(403, 'bad-token', 'Missing or wrong page token. Reload the page.');
   }
 
-  async function inventory() {
-    return buildInventory({ home: config.home, cli: config.cli, ...(config.managedSettingsPath ? { managedSettingsPath: config.managedSettingsPath } : {}) });
+  async function inventory(plugins?: InstalledPlugin[]) {
+    return buildInventory({
+      home: config.home, cli: config.cli,
+      ...(config.managedSettingsPath ? { managedSettingsPath: config.managedSettingsPath } : {}),
+      ...(plugins ? { plugins } : {}),
+    });
   }
 
   async function handleAction(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -114,16 +119,23 @@ export function createApp(config: AppConfig) {
 
     const outcome = await lock.tryRun(async () => {
       // I3: look the item up in a fresh inventory; never trust names or paths from the browser.
-      const item = (await inventory()).items.find((i) => i.id === itemId);
+      const inv = await inventory();
+      const item = inv.items.find((i) => i.id === itemId);
       if (!item) throw new HttpError(404, 'unknown-item', 'That item no longer exists. Refresh the page.');
       const availability = item.actions[action as ActionName];
       if (!availability || !availability.allowed) {
         throw new HttpError(409, 'not-allowed', availability?.reason ?? `"${action}" isn't available for this item yet.`);
       }
-      // Milestones M4–M8 plug the real action executors in here.
-      throw new HttpError(409, 'not-allowed', `"${action}" isn't implemented yet.`);
+      try {
+        // Skill/agent changes can't affect plugins, so the re-read reuses the plugin list (much faster).
+        const reread = item.kind === 'plugin' ? () => inventory() : () => inventory(inv.plugins);
+        return await executeAction(item, action as ActionName, inv, { home: config.home, appDir: config.appDir, projects: [], inventory: reread });
+      } catch (e) {
+        throw new HttpError(500, 'action-failed', (e as Error).message);
+      }
     });
     if (!outcome.ran) throw new HttpError(423, 'busy', 'Another change is still running. Try again in a moment.');
+    return json(res, 200, outcome.value);
   }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {

@@ -48,7 +48,8 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
   - the `X-CCP-Token` header, matching the per-run token the server puts in a `<meta>` tag of index.html
 - `src/adapters/settingsFile.ts` → `updateSettingsFile()` is the **only** function that writes settings. Its steps: check the allow-list (`src/domain/paths.ts`), back up the text it read, re-read and retry if the file changed, then write atomically.
 - `ActionLock` allows one action at a time. A second request gets 423.
-- `POST /api/actions` validates the request and looks the item up in a fresh inventory. Executors are added from M4 on.
+- `POST /api/actions` validates the request, looks the item up in a fresh inventory, then hands it to `executeAction()` (`src/services/actions.ts`). That function writes through `updateSettingsFile()`, re-reads, warns if another file overrides the change, and appends to `~/.claude-control-panel/actions.log`.
+- `src/domain/rules.ts` decides which actions each item allows and why not. `src/domain/mutations.ts` holds the exact JSON edits. Both are pure.
 
 ## Current status
-M0–M3 are done. **Next: M4**, switching standalone skills on or off and blocking or unblocking agents.
+M0–M4 are done: standalone skills and commands switch on or off, and standalone agents can be blocked or unblocked. This was checked live with a byte-identical round-trip (D-008). **Next: M5**, plugin enable, disable and uninstall.

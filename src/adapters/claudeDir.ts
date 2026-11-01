@@ -58,53 +58,48 @@ async function readSkillFolder(folder: string): Promise<FoundComponent> {
  * Skills from one or more locations. Each location is either a skill folder itself
  * (contains SKILL.md) or a folder of skill folders. Folders without SKILL.md are skipped.
  */
+// File reads below run in parallel (Promise.all): reading ~1,200 files one after another took seconds.
+
+/** Skill folders under one location: the location itself if it holds SKILL.md, else its subfolders that do. */
+async function skillFolders(loc: string): Promise<string[]> {
+  if (await isFile(join(loc, 'SKILL.md'))) return [loc];
+  if (!(await isDir(loc))) return [];
+  const candidates = (await readdir(loc)).map((entry) => join(loc, entry));
+  const checks = await Promise.all(candidates.map((f) => isFile(join(f, 'SKILL.md'))));
+  return candidates.filter((_, i) => checks[i]);
+}
+
 export async function readSkills(locations: string[]): Promise<FoundComponent[]> {
-  const found = new Map<string, FoundComponent>();
-  for (const loc of locations) {
-    if (await isFile(join(loc, 'SKILL.md'))) {
-      found.set(resolve(loc), await readSkillFolder(loc));
-      continue;
-    }
-    if (!(await isDir(loc))) continue;
-    for (const entry of await readdir(loc)) {
-      const folder = join(loc, entry);
-      if (await isFile(join(folder, 'SKILL.md'))) found.set(resolve(folder), await readSkillFolder(folder));
-    }
-  }
-  return [...found.values()];
+  const folders = new Map<string, string>();
+  for (const list of await Promise.all(locations.map(skillFolders))) for (const f of list) folders.set(resolve(f), f);
+  return Promise.all([...folders.values()].map(readSkillFolder));
 }
 
 /** Markdown files from locations that are either `.md` files or folders of them. */
 async function markdownFiles(locations: string[]): Promise<string[]> {
-  const files = new Set<string>();
-  for (const loc of locations) {
-    if (loc.endsWith('.md') && (await isFile(loc))) files.add(resolve(loc));
-    else if (await isDir(loc)) {
-      for (const entry of await readdir(loc)) if (entry.endsWith('.md')) files.add(resolve(join(loc, entry)));
-    }
-  }
-  return [...files];
+  const lists = await Promise.all(locations.map(async (loc) => {
+    if (loc.endsWith('.md')) return (await isFile(loc)) ? [resolve(loc)] : [];
+    if (!(await isDir(loc))) return [];
+    return (await readdir(loc)).filter((e) => e.endsWith('.md')).map((e) => resolve(join(loc, e)));
+  }));
+  return [...new Set(lists.flat())];
 }
 
 export async function readAgents(locations: string[]): Promise<FoundComponent[]> {
-  const out: FoundComponent[] = [];
-  for (const file of await markdownFiles(locations)) {
+  return Promise.all((await markdownFiles(locations)).map(async (file) => {
     const md = await readMarkdown(file);
     const name = stringField(md.data, 'name') ?? basename(file, '.md');
     const warnings = md.frontmatterError ? [...md.warnings, md.frontmatterError] : md.warnings;
-    out.push({ key: name, name, description: description(md), path: file, warnings });
-  }
-  return out;
+    return { key: name, name, description: description(md), path: file, warnings };
+  }));
 }
 
 /** Commands: frontmatter is optional, so a missing block is not a warning (a broken one is). */
 export async function readCommands(locations: string[]): Promise<FoundComponent[]> {
-  const out: FoundComponent[] = [];
-  for (const file of await markdownFiles(locations)) {
+  return Promise.all((await markdownFiles(locations)).map(async (file) => {
     const md = await readMarkdown(file);
     const key = basename(file, '.md');
     const broken = md.frontmatterError && md.frontmatterError !== 'no frontmatter block';
-    out.push({ key, name: key, description: description(md), path: file, warnings: broken ? [...md.warnings, md.frontmatterError!] : md.warnings });
-  }
-  return out;
+    return { key, name: key, description: description(md), path: file, warnings: broken ? [...md.warnings, md.frontmatterError!] : md.warnings };
+  }));
 }

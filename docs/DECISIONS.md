@@ -2,6 +2,15 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-008 · Toggles leave no trace when reversed; file reads run in parallel (2026-11-01)
+- **Commands:** `skillOverrides` turns off a standalone **command** too. A probe showed `ccp-cmd` gone from `slash_commands`. So commands share the skill switch.
+- **Clean reversal:** removing an override or deny rule also removes the container (`skillOverrides`, `permissions.deny`, `permissions`), but only when *that removal* emptied it. Containers the user already had empty are kept.
+  - *Live proof on the real `~/.claude/settings.json`:* a throwaway skill was turned off and on, and a throwaway agent was blocked and unblocked, all through the page. The file's SHA-256 afterwards was identical to before. Claude Code's `init` event confirmed the skill really disappeared while off.
+- **Speed:** a toggle first took about 10 s. Measuring showed the cause was reading ~1,200 skill and agent files one at a time (2.4–6.7 s), not the CLI.
+  - Reads now run in parallel: 0.6–0.8 s.
+  - The re-read after a skill or agent change reuses the plugin list it already has.
+  - *Still slow:* the inventory *before* a change calls `claude plugin list` (2–3 s, longer while `mcp list` runs).
+
 ## D-007 · Settings writes: back up what we read, retry if the file changes (2026-11-01)
 - **Found by a test:** the first version copied the file from disk for its backup. When another program (Claude Code) changed the file between our read and our backup, the backup held *their* version rather than the one we were replacing. Backup verification caught it and refused to write, so nothing was lost.
 - **Decision:**

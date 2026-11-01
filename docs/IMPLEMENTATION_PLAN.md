@@ -12,7 +12,7 @@ Verification commands (from M0 on): `npm test` · `npm run typecheck` · `npm st
 | M1 | Read-only inventory: plugins, skills, agents, with search | ✅ 2026-11-01 |
 | M2 | Token costs + MCP list/health (text parsers) | ✅ 2026-11-01 |
 | M3 | Safety core: token/origin checks, lock, backup + atomic settings writer, allow-list | ✅ 2026-11-01 |
-| M4 | Standalone skill on/off and agent block/unblock | ☐ |
+| M4 | Standalone skill on/off and agent block/unblock | ✅ 2026-11-01 |
 | M5 | Plugin enable/disable/uninstall | ☐ |
 | M6 | Trash: delete + restore standalone skills/agents | ☐ |
 | M7 | Project scope (picker, project items, local-settings writes, precedence warnings) | ☐ |
