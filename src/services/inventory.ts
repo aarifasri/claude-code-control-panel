@@ -7,7 +7,7 @@ import { listPlugins, type ClaudeCli, type InstalledPlugin } from '../adapters/c
 import { readJsonObject } from '../adapters/jsonFile.ts';
 import { agentState, skillState } from '../domain/effective.ts';
 import { itemId, projectHash } from '../domain/ids.ts';
-import { isAllowedSettingsFile, userSettingsPath } from '../domain/paths.ts';
+import { isAllowedSettingsFile, projectLocalSettingsPath, userSettingsPath } from '../domain/paths.ts';
 import { actionsFor } from '../domain/rules.ts';
 import type { Item, Scope, SettingsLayer, SettingsLevel } from '../domain/types.ts';
 
@@ -138,7 +138,8 @@ async function pluginItems(p: InstalledPlugin): Promise<Item[]> {
 export async function buildInventory(opts: InventoryOptions): Promise<Inventory> {
   const layers = await readLayers(opts);
   const [plugins, userRoot, projectRoot] = await Promise.all([
-    opts.plugins ? Promise.resolve(opts.plugins) : listPlugins(opts.cli),
+    // Run in the project folder so `enabled` reflects that project's local settings too.
+    opts.plugins ? Promise.resolve(opts.plugins) : listPlugins(opts.cli, opts.project),
     readRoot(join(opts.home, '.claude')),
     opts.project ? readRoot(join(opts.project, '.claude')) : Promise.resolve(undefined),
   ]);
@@ -151,9 +152,15 @@ export async function buildInventory(opts: InventoryOptions): Promise<Inventory>
   }
   for (const list of await Promise.all(plugins.map(pluginItems))) items.push(...list);
 
-  // Project view (M7) will target the project's settings.local.json; for now toggles go to user settings.
+  // User view writes ~/.claude/settings.json; project view writes the project's personal
+  // settings.local.json, so a change affects only that project (BR-4).
   const writeScope = { home: opts.home, appDir: join(opts.home, '.claude-control-panel'), projects: opts.project ? [opts.project] : [] };
-  const ctx = { layers, targetFile: userSettingsPath(opts.home), isWritable: (f: string) => isAllowedSettingsFile(f, writeScope) };
+  const ctx = {
+    layers,
+    targetFile: opts.project ? projectLocalSettingsPath(opts.project) : userSettingsPath(opts.home),
+    isWritable: (f: string) => isAllowedSettingsFile(f, writeScope),
+    ...(opts.project ? { project: opts.project } : {}),
+  };
   for (const item of items) item.actions = actionsFor(item, ctx);
 
   return { items, layers, plugins, generatedAt: new Date().toISOString() };

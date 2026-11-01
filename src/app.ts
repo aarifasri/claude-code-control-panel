@@ -15,6 +15,7 @@ import { getCosts } from './services/costs.ts';
 import { buildInventory } from './services/inventory.ts';
 import { ActionLock } from './services/lock.ts';
 import { listMcp } from './services/mcp.ts';
+import { listProjects, resolveProject } from './services/projects.ts';
 
 export interface AppConfig {
   home: string;
@@ -101,26 +102,44 @@ export function createApp(config: AppConfig) {
     if (typeof given !== 'string' || !sameSecret(given, token)) throw new HttpError(403, 'bad-token', 'Missing or wrong page token. Reload the page.');
   }
 
-  async function inventory(plugins?: InstalledPlugin[]) {
+  async function inventory(project: string | null, plugins?: InstalledPlugin[]) {
     return buildInventory({
       home: config.home, cli: config.cli,
       ...(config.managedSettingsPath ? { managedSettingsPath: config.managedSettingsPath } : {}),
+      ...(project ? { project } : {}),
       ...(plugins ? { plugins } : {}),
     });
+  }
+
+  /** The project in view, validated against the known projects (never a raw browser path, I3). */
+  async function projectParam(requested: unknown): Promise<string | null> {
+    if (requested === undefined || requested === null || requested === '') return null;
+    if (typeof requested !== 'string' || requested.length > 1000) throw new HttpError(400, 'invalid-request', 'project must be a path string');
+    const project = await resolveProject(config.home, requested);
+    if (!project) throw new HttpError(400, 'unknown-project', 'That folder is not one of your Claude Code projects.');
+    return project;
+  }
+
+  /** Trash may restore into any known project's .claude folder, whatever view is open. */
+  async function trashOpts() {
+    const projects = (await listProjects(config.home)).map((p) => p.path);
+    return trashOptions({ home: config.home, appDir: config.appDir, projects });
   }
 
   async function handleAction(req: IncomingMessage, res: ServerResponse): Promise<void> {
     checkWriteRequest(req);
     const body = await readBody(req);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'invalid-request', 'Body must be a JSON object');
-    const { itemId, action, confirm } = body as Record<string, unknown>;
+    const { itemId, action, confirm, project: requestedProject } = body as Record<string, unknown>;
     if (typeof itemId !== 'string' || itemId.length > 500) throw new HttpError(400, 'invalid-request', 'itemId must be a string');
     if (typeof action !== 'string' || !ACTIONS.includes(action as ActionName)) throw new HttpError(400, 'invalid-request', `action must be one of ${ACTIONS.join(', ')}`);
     if (action === 'delete' && confirm !== true) throw new HttpError(400, 'invalid-request', 'Deleting requires confirm: true');
 
+    const project = await projectParam(requestedProject);
     const deps = (inv?: { plugins: InstalledPlugin[] }) => ({
-      cli: config.cli, home: config.home, appDir: config.appDir, projects: [] as string[],
-      inventory: inv ? () => inventory(inv.plugins) : () => inventory(),
+      cli: config.cli, home: config.home, appDir: config.appDir,
+      projects: project ? [project] : [], ...(project ? { project } : {}),
+      inventory: inv ? () => inventory(project, inv.plugins) : () => inventory(project),
     });
 
     if (action === 'restore') {
@@ -129,7 +148,7 @@ export function createApp(config: AppConfig) {
       if (!m) throw new HttpError(400, 'invalid-request', 'restore needs itemId "trash:<entry id>"');
       const restored = await lock.tryRun(async () => {
         try {
-          return await restoreAction(m[1]!, deps());
+          return await restoreAction(m[1]!, deps(), await trashOpts());
         } catch (e) {
           if (e instanceof TrashError) {
             const status = e.code === 'missing' ? 404 : e.code === 'failed' ? 500 : 409;
@@ -144,7 +163,7 @@ export function createApp(config: AppConfig) {
 
     const outcome = await lock.tryRun(async () => {
       // I3: look the item up in a fresh inventory; never trust names or paths from the browser.
-      const inv = await inventory();
+      const inv = await inventory(project);
       const item = inv.items.find((i) => i.id === itemId);
       if (!item) throw new HttpError(404, 'unknown-item', 'That item no longer exists. Refresh the page.');
       const availability = item.actions[action as ActionName];
@@ -173,9 +192,14 @@ export function createApp(config: AppConfig) {
       return send(res, 200, text, TYPES[extname(file)]!);
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/projects') {
+      return json(res, 200, { projects: await listProjects(config.home) });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/inventory') {
+      const project = await projectParam(url.searchParams.get('project'));
       try {
-        const inv = await inventory();
+        const inv = await inventory(project);
         return json(res, 200, {
           items: inv.items,
           layers: inv.layers.map(({ level, file, data, error }) => ({ level, file, exists: data !== null, error })),
@@ -196,16 +220,18 @@ export function createApp(config: AppConfig) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/mcp') {
+      const project = await projectParam(url.searchParams.get('project'));
       try {
-        const [plugins, summary] = await Promise.all([listPlugins(config.cli), readClaudeJsonSummary(config.home)]);
-        return json(res, 200, await listMcp({ cli: config.cli, summary, plugins, cwd: config.cwd }));
+        const cwd = project ?? config.cwd;
+        const [plugins, summary] = await Promise.all([listPlugins(config.cli, cwd), readClaudeJsonSummary(config.home)]);
+        return json(res, 200, await listMcp({ cli: config.cli, summary, plugins, cwd }));
       } catch (e) {
         throw new HttpError(500, 'mcp-failed', (e as Error).message);
       }
     }
 
     if (req.method === 'GET' && url.pathname === '/api/trash') {
-      return json(res, 200, { entries: await listTrash(trashOptions({ home: config.home, appDir: config.appDir, projects: [] })) });
+      return json(res, 200, { entries: await listTrash(await trashOpts()) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/actions') return handleAction(req, res);

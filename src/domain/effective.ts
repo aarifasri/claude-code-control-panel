@@ -31,6 +31,15 @@ export function skillState(folder: string, layers: SettingsLayer[]): Effective {
   return { state: 'on' };
 }
 
+/**
+ * What to write to `targetFile` to turn a skill on. If the other files would leave it on, just remove
+ * our entry (cleanest); if a lower-precedence file turns it off (e.g. user settings, while we write a
+ * project's settings.local.json), we need an explicit "on" that overrides it for this project only.
+ */
+export function skillEnableValue(folder: string, layers: SettingsLayer[], targetFile: string): 'on' | undefined {
+  return skillState(folder, layers.filter((l) => l.file !== targetFile)).state === 'on' ? undefined : 'on';
+}
+
 /** All deny rules in a layer, as strings. */
 export function denyRules(layer: SettingsLayer): string[] {
   const deny = asRecord(layer.data?.permissions)?.deny;

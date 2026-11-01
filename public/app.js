@@ -9,7 +9,13 @@ const state = {
   pendingId: null,                        // item with an action in flight
   restartNeeded: false,
   trash: [],                              // TrashEntry[]
+  project: '',                            // '' = user view; else a project path from /api/projects
 };
+
+/** Query string for the current view. */
+function viewQuery() {
+  return state.project ? `?project=${encodeURIComponent(state.project)}` : '';
+}
 const $ = (sel) => document.querySelector(sel);
 const TOKEN = document.querySelector('meta[name="ccp-token"]')?.content ?? '';
 
@@ -92,7 +98,7 @@ async function post(body) {
   const res = await fetch('/api/actions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CCP-Token': TOKEN },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...(state.project ? { project: state.project } : {}) }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
@@ -113,7 +119,7 @@ async function restore(entry) {
   render();
   try {
     const body = await post({ itemId: `trash:${entry.id}`, action: 'restore' });
-    state.items = (await getJson('/api/inventory')).items;
+    state.items = (await getJson(`/api/inventory${viewQuery()}`)).items;
     await loadTrash();
     state.restartNeeded ||= body.restartNeeded;
     toast([`${entry.name} restored to ${entry.originalPath}.`, ...body.warnings].join(' '), body.warnings.length ? 'warn' : 'ok');
@@ -159,7 +165,7 @@ async function act(item, action) {
     else if (i !== -1) state.items.splice(i, 1);
     if (!body.item && state.selectedId === item.id) state.selectedId = null;
     // A plugin change also changes the state of everything inside it: reload the list.
-    if (item.kind === 'plugin') state.items = (await getJson('/api/inventory')).items;
+    if (item.kind === 'plugin') state.items = (await getJson(`/api/inventory${viewQuery()}`)).items;
     state.restartNeeded ||= body.restartNeeded;
     if (body.trashEntry) {
       await loadTrash();
@@ -209,20 +215,27 @@ async function load() {
   $('#summary').textContent = 'Loading…';
   $('#error').hidden = true;
   state.costs = state.mcp = state.costsError = state.mcpError = null;
+  // Ignore responses from an earlier load (e.g. the previous project, if the user switched quickly).
+  const gen = ++loadGeneration;
+  const current = () => gen === loadGeneration;
   try {
-    [state.items] = await Promise.all([getJson('/api/inventory').then((b) => b.items), loadTrash()]);
+    const [items] = await Promise.all([getJson(`/api/inventory${viewQuery()}`).then((b) => b.items), loadTrash()]);
+    if (!current()) return;
+    state.items = items;
     renderSourceFilter();
     render();
   } catch (e) {
+    if (!current()) return;
     $('#summary').textContent = '';
     $('#error').textContent = `Could not load inventory: ${e.message}`;
     $('#error').hidden = false;
     return;
   }
   // Slow sources load after the list is already usable.
-  getJson('/api/costs').then((c) => { state.costs = c; }, (e) => { state.costsError = e.message; }).finally(render);
-  getJson('/api/mcp').then((m) => { state.mcp = m.items; }, (e) => { state.mcpError = e.message; }).finally(render);
+  getJson('/api/costs').then((c) => { if (current()) state.costs = c; }, (e) => { if (current()) state.costsError = e.message; }).finally(render);
+  getJson(`/api/mcp${viewQuery()}`).then((m) => { if (current()) state.mcp = m.items; }, (e) => { if (current()) state.mcpError = e.message; }).finally(render);
 }
+let loadGeneration = 0;
 
 function renderSourceFilter() {
   const select = $('#f-source');
@@ -377,7 +390,7 @@ function renderDetail() {
     el('h2', {}, item.name),
     el('dl', {}, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])),
     button || uninstall ? el('div', { class: 'actions' }, button, uninstall,
-      target ? el('p', { class: 'muted small' }, item.kind === 'plugin' ? `Runs: ${target}` : `Changes ${target} (backed up first).`) : null) : null,
+      target ? el('p', { class: 'muted small' }, item.kind === 'plugin' ? `Runs: ${target}` : `Changes ${target} (backed up first)${state.project ? ': this project only.' : ': all projects.'}`) : null) : null,
     top ? [el('h3', {}, 'Largest always-on components'), el('ol', { class: 'top' }, top.map((c) => el('li', {}, `${c.name} — ${fmtTokens(c.alwaysOn)}`)))] : null,
     note ? el('p', { class: 'muted' }, note) : null,
   );
@@ -388,4 +401,24 @@ for (const tab of document.querySelectorAll('[role=tab]')) {
 }
 for (const id of ['#search', '#f-state', '#f-source', '#sort']) $(id).addEventListener('input', render);
 $('#refresh').addEventListener('click', load);
+
+async function loadProjects() {
+  try {
+    const { projects } = await getJson('/api/projects');
+    fill($('#scope'),
+      el('option', { value: '' }, 'User (all projects)'),
+      projects.length ? el('optgroup', { label: 'Project (changes only that project)' },
+        projects.map((p) => el('option', { value: p.path, title: p.path }, p.name))) : null);
+  } catch {
+    // Project view is optional; user view keeps working.
+  }
+}
+
+$('#scope').addEventListener('change', () => {
+  state.project = $('#scope').value;
+  state.selectedId = null;
+  load();
+});
+
+loadProjects();
 load();

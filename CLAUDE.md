@@ -62,5 +62,10 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - Restore uses itemId `trash:<entry id>`, because trashed items aren't in the inventory. Restore returns 409 `restore-conflict` instead of overwriting.
 - UI rule: use `fill()`, not `replaceChildren()`, whenever a child may be null.
 
+## Project view (M7, D-011)
+- `src/services/projects.ts` → `listProjects()` and `resolveProject()`. Every API call takes an optional `project`, validated against that list.
+- In project view the target is `<project>/.claude/settings.local.json`, and the `claude` CLI runs with `cwd = project`.
+- The page uses a load-generation counter, so responses from a previously selected project are ignored.
+
 ## Current status
-M0–M6 are done: switch skills, commands, agents and user-scope plugins; delete standalone items to the trash and restore them. **Next: M7**, project scope.
+M0–M7 are done: user view and project view; switch skills, commands, agents and plugins; trash and restore. **Next: M8**, the hooks view, the disable-all-hooks switch, and removing MCP servers.

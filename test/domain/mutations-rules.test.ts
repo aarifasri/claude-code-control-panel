@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { skillEnableValue } from '../../src/domain/effective.ts';
 import { addAgentDeny, removeAgentDeny, setSkillOverride } from '../../src/domain/mutations.ts';
 import { actionsFor, type RuleContext } from '../../src/domain/rules.ts';
 import type { Item, SettingsLayer } from '../../src/domain/types.ts';
@@ -123,9 +124,19 @@ test('plugin: user scope can be toggled and uninstalled (keeping data)', () => {
   assert.deepEqual(off.enable, { allowed: true, target: 'claude plugin enable fd@official --scope user' });
 });
 
-test('plugin: local scope waits for project view', () => {
+test('plugin: local scope needs its project in view, then runs there', () => {
   const local = actionsFor(item({ kind: 'plugin', key: 'fd@official', scope: 'local' }), ctx([]));
-  assert.match((local.disable as { reason: string }).reason, /project view/);
+  assert.match((local.disable as { reason: string }).reason, /Scope picker/);
+  const inProject = actionsFor(item({ kind: 'plugin', key: 'fd@official', scope: 'local' }), { ...ctx([]), project: 'C:/p' });
+  assert.deepEqual(inProject.disable, { allowed: true, target: 'claude plugin disable fd@official --scope local (in C:/p)' });
+});
+
+test('skillEnableValue: remove our entry when that is enough, else an explicit "on"', () => {
+  const local = 'local.json';
+  // Only our file turns it off → removing the entry is enough.
+  assert.equal(skillEnableValue('s', [L('user', {}), L('local', { skillOverrides: { s: 'off' } }, local)], local), undefined);
+  // User settings turn it off → project-local needs "on" to override for this project only.
+  assert.equal(skillEnableValue('s', [L('user', { skillOverrides: { s: 'off' } }), L('local', {}, local)], local), 'on');
 });
 
 test('plugin: synced and project-scope plugins are view-only', () => {

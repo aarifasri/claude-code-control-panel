@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import type { ClaudeCli } from '../adapters/cli.ts';
 import { backupSettingsFile, updateSettingsFile, type JsonObject } from '../adapters/settingsFile.ts';
 import { SAFE_PLUGIN_ID } from '../domain/rules.ts';
-import { agentRuleMatches, denyRules } from '../domain/effective.ts';
+import { agentRuleMatches, denyRules, skillEnableValue } from '../domain/effective.ts';
 import { projectHash } from '../domain/ids.ts';
 import { moveToTrash, restoreFromTrash, type TrashEntry, type TrashKind, type TrashOptions } from '../adapters/trash.ts';
-import { isAllowedSettingsFile, isTrashableSource, userSettingsPath, type WriteScope } from '../domain/paths.ts';
+import { isAllowedSettingsFile, isTrashableSource, projectLocalSettingsPath, userSettingsPath, type WriteScope } from '../domain/paths.ts';
 import { addAgentDeny, removeAgentDeny, setSkillOverride } from '../domain/mutations.ts';
 import type { ActionName, Item, ItemState } from '../domain/types.ts';
 import type { Inventory } from './inventory.ts';
@@ -17,7 +17,10 @@ export interface ActionDeps {
   cli: ClaudeCli;
   home: string;
   appDir: string;
+  /** Projects whose settings.local.json may be written (the one in view, if any). */
   projects: string[];
+  /** Project in view: plugin commands run in this folder. */
+  project?: string;
   /** Fresh inventory, used after the change to report the real result. */
   inventory: () => Promise<Inventory>;
 }
@@ -60,7 +63,7 @@ async function writeSettings(file: string, mutate: (d: JsonObject) => void, deps
 /** The settings file the CLI changes for a plugin in this scope. */
 function pluginSettingsFile(item: Item, deps: ActionDeps): string | undefined {
   if (item.scope === 'user') return userSettingsPath(deps.home);
-  // Local-scope plugins live in a project's settings.local.json; project view arrives in M7.
+  if (item.scope === 'local' && deps.project) return projectLocalSettingsPath(deps.project);
   return undefined;
 }
 
@@ -74,10 +77,11 @@ async function pluginCommand(item: Item, action: ActionName, deps: ActionDeps): 
   const verb = action === 'delete' ? 'uninstall' : action;
   if (verb !== 'enable' && verb !== 'disable' && verb !== 'uninstall') throw new ActionFailed(`"${action}" isn't available for plugins.`);
   const file = pluginSettingsFile(item, deps);
-  if (!file) throw new ActionFailed(`Changing ${item.scope}-scope plugins arrives with project view (M7).`);
+  if (!file) throw new ActionFailed(`Can't change a ${item.scope}-scope plugin from this view.`);
   const backup = await backupSettingsFile(file, writeOptions(file, deps));
   const args = ['plugin', verb, item.key, '--scope', item.scope, '--json', ...(verb === 'uninstall' ? ['--keep-data'] : [])];
-  const res = await deps.cli.run(args, 120_000);
+  // Local scope means "the project the CLI runs in", so it must run in the project folder.
+  const res = await deps.cli.run(args, 120_000, item.scope === 'local' ? deps.project : undefined);
   if (res.code !== 0) {
     const detail = (res.stderr || res.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400);
     throw new ActionFailed(`claude plugin ${verb} failed (exit ${res.code}): ${detail}`);
@@ -113,7 +117,8 @@ export async function executeAction(item: Item, action: ActionName, inv: Invento
       const b = await pluginCommand(item, action, deps);
       if (b) backups.push(b);
     } else if (item.kind === 'skill' && (action === 'enable' || action === 'disable')) {
-      const b = await writeSettings(availability.target, (d) => setSkillOverride(d, item.key, action === 'disable' ? 'off' : undefined), deps);
+      const value = action === 'disable' ? 'off' : skillEnableValue(item.key, inv.layers, availability.target);
+      const b = await writeSettings(availability.target, (d) => setSkillOverride(d, item.key, value), deps);
       if (b) backups.push(b);
     } else if (item.kind === 'agent' && action === 'disable') {
       const b = await writeSettings(availability.target, (d) => addAgentDeny(d, item.key), deps);
@@ -152,10 +157,10 @@ function leftoverSettingsNotes(item: Item): string[] {
   return [`Its setting (${item.stateSource.detail}) is kept, so it comes back the same way if you restore it.`];
 }
 
-export async function restoreAction(entryId: string, deps: ActionDeps): Promise<ActionResult> {
+export async function restoreAction(entryId: string, deps: ActionDeps, opts: TrashOptions = trashOptions(deps)): Promise<ActionResult> {
   let entry: TrashEntry;
   try {
-    entry = await restoreFromTrash(entryId, trashOptions(deps));
+    entry = await restoreFromTrash(entryId, opts);
   } catch (e) {
     await log(deps, { action: 'restore', trashId: entryId, ok: false, error: (e as Error).message });
     throw e;

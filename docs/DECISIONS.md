@@ -2,6 +2,25 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-011 · Project view: personal settings.local.json, CLI runs in the project (2026-11-01)
+- **Project picker:**
+  - The picker lists only folders from `~/.claude.json` → `projects` that still exist, de-duplicated across `/` and `\` and letter case.
+  - The **home folder is excluded**: its `.claude/settings.json` *is* the user settings file, so listing it would count the same file twice.
+  - A project path from the browser is matched against that list. The raw string is never used (I3).
+- **Writes** go to `<project>/.claude/settings.local.json` only. The shared `.claude/settings.json` is never written (BR-4).
+- **Enable a skill for one project:** write `"on"` if a lower-precedence file turns it off (`skillEnableValue`), otherwise just remove our entry.
+- **Unblock an agent:** removes the deny rule from every writable file, *including user settings*, because deny rules merge and an allow rule can't beat them. The target shown names both files, so the global effect is visible.
+- **Local-scope plugins:** `claude plugin … --scope local` means "the project the CLI runs in", so the command runs with `cwd = project`. `plugin list` and `mcp list` also run there.
+- **Trash:** restore may target any known project's `.claude` folder, whatever view is open.
+- **Live test on the empty `ClaudeCodeTest` project:**
+  - Turned off the user skill `careful` for that project only.
+  - Claude Code's `init` event showed `careful` missing inside the project but still loaded in another folder.
+  - User `settings.json`'s SHA-256 was unchanged.
+- **Known leftover:**
+  - After turning it back on, the app leaves a `{}` `settings.local.json` that didn't exist before. It's harmless, since Claude Code treats it like no file.
+  - The test removed it by hand. Deleting files the app created is a possible later improvement.
+- **Stray servers:** a restart found five `node src/server.ts` processes from earlier background starts. Restarts now go through one stop-all step, and the count was checked to be one.
+
 ## D-010 · Trash: record first, then move; check both ends on restore (2026-11-01)
 - **Delete** moves a standalone skill folder, or an agent or command `.md` file, into `~/.claude-control-panel/trash/<time>_<rand>/<name>`. The entry goes into `trash/manifest.json` *before* the move: if the move fails, the entry is removed again; if the app crashes after the move, the entry still says where the item belongs.
 - **Allowed sources** (`isTrashableSource`): exactly one level inside `<root>/skills/`, or a `.md` file directly in `<root>/agents/` or `<root>/commands/`. Plugin files never qualify.

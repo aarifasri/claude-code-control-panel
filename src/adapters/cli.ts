@@ -18,13 +18,14 @@ export interface InstalledPlugin {
 
 /** Interface so tests (and services) can use a fake instead of the real CLI. */
 export interface ClaudeCli {
-  run(args: string[], timeoutMs?: number): Promise<CliResult>;
+  /** `cwd` matters: Claude Code decides which project's local settings apply from the folder it runs in. */
+  run(args: string[], timeoutMs?: number, cwd?: string): Promise<CliResult>;
 }
 
 export const realCli: ClaudeCli = {
-  run(args, timeoutMs = 60_000) {
+  run(args, timeoutMs = 60_000, cwd) {
     return new Promise((resolvePromise) => {
-      execFile('claude', args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile('claude', args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 32 * 1024 * 1024, ...(cwd ? { cwd } : {}) }, (err, stdout, stderr) => {
         const code = err ? (typeof err.code === 'number' ? err.code : -1) : 0;
         const extra = err && typeof err.code !== 'number' ? `\n${err.message}` : '';
         resolvePromise({ code, stdout: String(stdout), stderr: String(stderr) + extra });
@@ -41,8 +42,8 @@ export class CliError extends Error {
   }
 }
 
-export async function listPlugins(cli: ClaudeCli): Promise<InstalledPlugin[]> {
-  const res = await cli.run(['plugin', 'list', '--json']);
+export async function listPlugins(cli: ClaudeCli, cwd?: string): Promise<InstalledPlugin[]> {
+  const res = await cli.run(['plugin', 'list', '--json'], undefined, cwd);
   if (res.code !== 0) throw new CliError(`claude plugin list failed (exit ${res.code}): ${res.stderr.trim()}`, res);
   let parsed: unknown;
   try {

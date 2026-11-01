@@ -15,8 +15,8 @@ function objectAt(data: Json, key: string): Json {
   return created;
 }
 
-/** Set `skillOverrides[folder]` to "off", or remove it (undefined) so the default (on) applies. */
-export function setSkillOverride(data: Json, folder: string, value: 'off' | undefined): void {
+/** Set `skillOverrides[folder]` to "off"/"on", or remove it (undefined) so lower files decide. */
+export function setSkillOverride(data: Json, folder: string, value: 'off' | 'on' | undefined): void {
   if (value === undefined) {
     const overrides = data.skillOverrides;
     if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides) || !(folder in overrides)) return;

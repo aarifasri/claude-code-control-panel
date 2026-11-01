@@ -16,7 +16,8 @@ button, input, select { font: inherit; color: inherit; }
 
 .top { display: flex; align-items: center; gap: 16px; padding: 14px 0 6px; flex-wrap: wrap; }
 .top h1 { font-size: 18px; margin: 0; margin-right: auto; }
-.scope { color: var(--muted); }
+.scope { color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.scope select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 260px; }
 .top button, .tabs button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
 .summary { margin: 4px 0 12px; color: var(--muted); }
 

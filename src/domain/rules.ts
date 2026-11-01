@@ -9,6 +9,8 @@ export interface RuleContext {
   targetFile: string;
   /** Whether the app may write this settings file (invariant I2). */
   isWritable: (file: string) => boolean;
+  /** Set in project view: the project folder (local-scope plugins then become changeable). */
+  project?: string;
 }
 
 type Actions = Partial<Record<ActionName, ActionAvailability>>;
@@ -64,7 +66,7 @@ function agentActions(item: Item, ctx: RuleContext): Actions {
  */
 export const SAFE_PLUGIN_ID = /^[A-Za-z0-9][\w.-]*@[A-Za-z0-9][\w.-]*$/;
 
-function pluginActions(item: Item): Actions {
+function pluginActions(item: Item, ctx: RuleContext): Actions {
   if (!SAFE_PLUGIN_ID.test(item.key)) {
     const reason = `Unexpected plugin id "${item.key}"; refusing to pass it to the claude CLI.`;
     return { enable: no(reason), disable: no(reason), delete: no(reason) };
@@ -77,26 +79,32 @@ function pluginActions(item: Item): Actions {
     const reason = 'Installed for the whole project (in its shared .claude/settings.json), so changing it would affect your team.';
     return { enable: no(reason), disable: no(reason), delete: no(reason) };
   }
-  if (item.scope !== 'user') {
-    // Local-scope plugins are stored in a project's settings.local.json, which needs project view (M7).
-    const reason = 'Installed for one project only; changing it arrives with project view.';
+  if (item.scope === 'local' && !ctx.project) {
+    // Local-scope plugins live in one project's settings.local.json; the CLI must run in that folder.
+    const reason = 'Installed for one project only: choose that project in the Scope picker to change it.';
     return { enable: no(reason), disable: no(reason), delete: no(reason) };
   }
-  const cmd = (verb: string) => `claude plugin ${verb} ${item.key} --scope ${item.scope}`;
+  if (item.scope !== 'user' && item.scope !== 'local') {
+    const reason = `Unexpected plugin scope "${item.scope}".`;
+    return { enable: no(reason), disable: no(reason), delete: no(reason) };
+  }
+  const where = item.scope === 'local' ? ` (in ${ctx.project})` : '';
+  const cmd = (verb: string) => `claude plugin ${verb} ${item.key} --scope ${item.scope}${where}`;
   return {
     enable: item.state === 'on' ? no('Already on.') : yes(cmd('enable')),
     disable: item.state === 'on' ? yes(cmd('disable')) : no('Already off.'),
-    delete: yes(`${cmd('uninstall')} --keep-data`),
+    delete: yes(`claude plugin uninstall ${item.key} --scope ${item.scope} --keep-data${where}`),
   };
 }
 
 const PLUGIN_PART = 'Part of a plugin: it can only be turned off by disabling the whole plugin.';
 
 export function actionsFor(item: Item, ctx: RuleContext): Actions {
-  if (item.kind === 'plugin') return pluginActions(item);
+  if (item.kind === 'plugin') return pluginActions(item, ctx);
   if (item.origin.type === 'plugin') return { enable: no(PLUGIN_PART), disable: no(PLUGIN_PART), delete: no(PLUGIN_PART) };
   const toTrash = item.path ? yes('Move to the control panel trash (can be restored)') : no('No file location known.');
-  if (item.kind === 'skill' && item.scope === 'user') return { ...skillActions(item, ctx), delete: toTrash };
-  if (item.kind === 'agent' && item.scope === 'user') return { ...agentActions(item, ctx), delete: toTrash };
+  const standalone = item.scope === 'user' || (item.scope === 'project' && !!ctx.project);
+  if (item.kind === 'skill' && standalone) return { ...skillActions(item, ctx), delete: toTrash };
+  if (item.kind === 'agent' && standalone) return { ...agentActions(item, ctx), delete: toTrash };
   return {};
 }
