@@ -60,5 +60,16 @@
 
   <div id="error" class="error" role="alert" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 id="confirm-title"></h2>
+      <p></p>
+      <div class="dialog-buttons">
+        <button value="cancel" autofocus>Cancel</button>
+        <button value="confirm" class="danger"></button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

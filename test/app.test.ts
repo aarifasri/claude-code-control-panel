@@ -127,6 +127,58 @@ test('agent blocked and unblocked, end to end', async () => {
   assert.equal(log.trim().split('\n').length, 2, 'both actions logged');
 });
 
+/** Fake CLI that behaves like the real one for plugin list/enable/disable/uninstall. */
+function pluginCli(options: { failVerb?: string } = {}) {
+  const plugins = [{ id: 'fd@official', version: '1.0.0', scope: 'user', enabled: true, installPath: '' }];
+  const calls: string[][] = [];
+  const cli: ClaudeCli = {
+    async run(args) {
+      calls.push(args);
+      if (args.join(' ') === 'plugin list --json') return { code: 0, stdout: JSON.stringify(plugins), stderr: '' };
+      const [, verb, id] = args;
+      if (verb === options.failVerb) return { code: 1, stdout: '', stderr: 'Plugin "fd@official" not found in user scope' };
+      const p = plugins.find((x) => x.id === id);
+      if (!p) return { code: 1, stdout: '', stderr: 'not installed' };
+      if (verb === 'disable') p.enabled = false;
+      else if (verb === 'enable') p.enabled = true;
+      else if (verb === 'uninstall') plugins.splice(plugins.indexOf(p), 1);
+      return { code: 0, stdout: '{"ok":true}', stderr: '' };
+    },
+  };
+  return { cli, calls };
+}
+
+test('plugin disable and enable run the CLI with the exact arguments (AC-2)', async () => {
+  const { cli, calls } = pluginCli();
+  const { post } = await start(cli);
+  const off = await (await post({ itemId: 'plugin:user:fd@official', action: 'disable' })).json();
+  assert.equal(off.item.state, 'off');
+  assert.equal(off.backups.length, 1, 'settings.json backed up before the CLI changed it (I1)');
+  assert.deepEqual(calls.find((c) => c[1] === 'disable'), ['plugin', 'disable', 'fd@official', '--scope', 'user', '--json']);
+  const on = await (await post({ itemId: 'plugin:user:fd@official', action: 'enable' })).json();
+  assert.equal(on.item.state, 'on');
+});
+
+test('plugin uninstall needs confirm, keeps data, and the item disappears', async () => {
+  const { cli, calls } = pluginCli();
+  const { post } = await start(cli);
+  assert.equal((await post({ itemId: 'plugin:user:fd@official', action: 'delete' })).status, 400, 'no confirm → refused');
+  assert.equal(calls.some((c) => c[1] === 'uninstall'), false, 'CLI never called without confirm');
+  const res = await (await post({ itemId: 'plugin:user:fd@official', action: 'delete', confirm: true })).json();
+  assert.equal(res.item, null);
+  assert.deepEqual(calls.find((c) => c[1] === 'uninstall'), ['plugin', 'uninstall', 'fd@official', '--scope', 'user', '--json', '--keep-data']);
+});
+
+test('plugin CLI failure is reported with its message and nothing changes', async () => {
+  const { cli } = pluginCli({ failVerb: 'disable' });
+  const { post, base } = await start(cli);
+  const res = await post({ itemId: 'plugin:user:fd@official', action: 'disable' });
+  assert.equal(res.status, 500);
+  assert.match((await res.json()).error.message, /exit 1.*not found in user scope/);
+  const inv = await (await fetch(`${base}/api/inventory`)).json();
+  assert.equal(inv.items.find((i: { id: string }) => i.id === 'plugin:user:fd@official').state, 'on');
+});
+
 test('a second action while one is running → 423 busy (I7)', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });

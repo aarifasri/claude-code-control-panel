@@ -129,7 +129,7 @@ export function createApp(config: AppConfig) {
       try {
         // Skill/agent changes can't affect plugins, so the re-read reuses the plugin list (much faster).
         const reread = item.kind === 'plugin' ? () => inventory() : () => inventory(inv.plugins);
-        return await executeAction(item, action as ActionName, inv, { home: config.home, appDir: config.appDir, projects: [], inventory: reread });
+        return await executeAction(item, action as ActionName, inv, { cli: config.cli, home: config.home, appDir: config.appDir, projects: [], inventory: reread });
       } catch (e) {
         throw new HttpError(500, 'action-failed', (e as Error).message);
       }

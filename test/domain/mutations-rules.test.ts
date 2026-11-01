@@ -114,6 +114,35 @@ test('agent: bare Agent rule, managed rule, or non-writable file → enable not 
   assert.match((shared.enable as { reason: string }).reason, /shared with your team/);
 });
 
+test('plugin: user scope can be toggled and uninstalled (keeping data)', () => {
+  const on = actionsFor(item({ kind: 'plugin', key: 'fd@official', scope: 'user' }), ctx([]));
+  assert.deepEqual(on.disable, { allowed: true, target: 'claude plugin disable fd@official --scope user' });
+  assert.deepEqual(on.delete, { allowed: true, target: 'claude plugin uninstall fd@official --scope user --keep-data' });
+  assert.equal(on.enable?.allowed, false);
+  const off = actionsFor(item({ kind: 'plugin', key: 'fd@official', scope: 'user', state: 'off' }), ctx([]));
+  assert.deepEqual(off.enable, { allowed: true, target: 'claude plugin enable fd@official --scope user' });
+});
+
+test('plugin: local scope waits for project view', () => {
+  const local = actionsFor(item({ kind: 'plugin', key: 'fd@official', scope: 'local' }), ctx([]));
+  assert.match((local.disable as { reason: string }).reason, /project view/);
+});
+
+test('plugin: synced and project-scope plugins are view-only', () => {
+  const synced = actionsFor(item({ kind: 'plugin', key: 'design@synced', scope: 'synced' }), ctx([]));
+  assert.match((synced.disable as { reason: string }).reason, /claude\.ai/);
+  const project = actionsFor(item({ kind: 'plugin', key: 'p@m', scope: 'project' }), ctx([]));
+  assert.match((project.delete as { reason: string }).reason, /affect your team/);
+});
+
+test('plugin: ids that could be read as CLI flags are refused', () => {
+  for (const key of ['-a', '--all', 'p@-m', 'no-at-sign', 'a b@m', 'p@m;rm']) {
+    const a = actionsFor(item({ kind: 'plugin', key, scope: 'user' }), ctx([]));
+    assert.equal(a.disable?.allowed, false, key);
+    assert.equal(a.delete?.allowed, false, key);
+  }
+});
+
 test('agent names with brackets are refused', () => {
   const a = actionsFor(item({ kind: 'agent', key: 'Bad (name)' }), ctx([]));
   assert.equal(a.disable?.allowed, false);

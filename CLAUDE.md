@@ -51,5 +51,11 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - `POST /api/actions` validates the request, looks the item up in a fresh inventory, then hands it to `executeAction()` (`src/services/actions.ts`). That function writes through `updateSettingsFile()`, re-reads, warns if another file overrides the change, and appends to `~/.claude-control-panel/actions.log`.
 - `src/domain/rules.ts` decides which actions each item allows and why not. `src/domain/mutations.ts` holds the exact JSON edits. Both are pure.
 
+## Plugins (M5, D-009)
+- User-scope plugins only: `claude plugin enable|disable|uninstall --scope user --json`. Uninstall adds `--keep-data`.
+- `SAFE_PLUGIN_ID` guards against ids that would be read as CLI flags.
+- `backupSettingsFile()` runs before every plugin command, because the CLI writes `settings.json` itself.
+- Claude Code's writer may reorder top-level keys. The content stays deep-equal.
+
 ## Current status
-M0–M4 are done: standalone skills and commands switch on or off, and standalone agents can be blocked or unblocked. This was checked live with a byte-identical round-trip (D-008). **Next: M5**, plugin enable, disable and uninstall.
+M0–M5 are done: skills, commands, agents and user-scope plugins can all be switched from the page. **Next: M6**, a trash folder for deleting standalone skills and agents, with restore.

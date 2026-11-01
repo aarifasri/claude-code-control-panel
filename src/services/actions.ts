@@ -2,7 +2,9 @@
 
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { updateSettingsFile, type JsonObject } from '../adapters/settingsFile.ts';
+import type { ClaudeCli } from '../adapters/cli.ts';
+import { backupSettingsFile, updateSettingsFile, type JsonObject } from '../adapters/settingsFile.ts';
+import { SAFE_PLUGIN_ID } from '../domain/rules.ts';
 import { agentRuleMatches, denyRules } from '../domain/effective.ts';
 import { projectHash } from '../domain/ids.ts';
 import { isAllowedSettingsFile, userSettingsPath, type WriteScope } from '../domain/paths.ts';
@@ -11,6 +13,7 @@ import type { ActionName, Item, ItemState } from '../domain/types.ts';
 import type { Inventory } from './inventory.ts';
 
 export interface ActionDeps {
+  cli: ClaudeCli;
   home: string;
   appDir: string;
   projects: string[];
@@ -33,14 +36,41 @@ function backupLabel(file: string, deps: ActionDeps): string {
   return project ? `project-${projectHash(project)}-settings.local` : 'settings';
 }
 
-async function writeSettings(file: string, mutate: (d: JsonObject) => void, deps: ActionDeps): Promise<string | undefined> {
+function writeOptions(file: string, deps: ActionDeps) {
   const scope: WriteScope = { home: deps.home, appDir: deps.appDir, projects: deps.projects };
-  const res = await updateSettingsFile(file, mutate, {
-    isAllowed: (p) => isAllowedSettingsFile(p, scope),
-    backupDir: join(deps.appDir, 'backups'),
-    label: backupLabel(file, deps),
-  });
-  return res.backup;
+  return { isAllowed: (p: string) => isAllowedSettingsFile(p, scope), backupDir: join(deps.appDir, 'backups'), label: backupLabel(file, deps) };
+}
+
+async function writeSettings(file: string, mutate: (d: JsonObject) => void, deps: ActionDeps): Promise<string | undefined> {
+  return (await updateSettingsFile(file, mutate, writeOptions(file, deps))).backup;
+}
+
+/** The settings file the CLI changes for a plugin in this scope. */
+function pluginSettingsFile(item: Item, deps: ActionDeps): string | undefined {
+  if (item.scope === 'user') return userSettingsPath(deps.home);
+  // Local-scope plugins live in a project's settings.local.json; project view arrives in M7.
+  return undefined;
+}
+
+/**
+ * Run `claude plugin enable|disable|uninstall` for an installed plugin. The CLI edits the settings
+ * file itself, so we back that file up first (I1). Returns the backup path, if one was made.
+ */
+async function pluginCommand(item: Item, action: ActionName, deps: ActionDeps): Promise<string | undefined> {
+  // Re-checked here as well as in rules.ts: this is the last line before the id reaches the CLI.
+  if (!SAFE_PLUGIN_ID.test(item.key)) throw new ActionFailed(`Unexpected plugin id "${item.key}"`);
+  const verb = action === 'delete' ? 'uninstall' : action;
+  if (verb !== 'enable' && verb !== 'disable' && verb !== 'uninstall') throw new ActionFailed(`"${action}" isn't available for plugins.`);
+  const file = pluginSettingsFile(item, deps);
+  if (!file) throw new ActionFailed(`Changing ${item.scope}-scope plugins arrives with project view (M7).`);
+  const backup = await backupSettingsFile(file, writeOptions(file, deps));
+  const args = ['plugin', verb, item.key, '--scope', item.scope, '--json', ...(verb === 'uninstall' ? ['--keep-data'] : [])];
+  const res = await deps.cli.run(args, 120_000);
+  if (res.code !== 0) {
+    const detail = (res.stderr || res.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400);
+    throw new ActionFailed(`claude plugin ${verb} failed (exit ${res.code}): ${detail}`);
+  }
+  return backup;
 }
 
 async function log(deps: ActionDeps, entry: Record<string, unknown>): Promise<void> {
@@ -63,7 +93,10 @@ export async function executeAction(item: Item, action: ActionName, inv: Invento
   const backups: string[] = [];
 
   try {
-    if (item.kind === 'skill' && (action === 'enable' || action === 'disable')) {
+    if (item.kind === 'plugin') {
+      const b = await pluginCommand(item, action, deps);
+      if (b) backups.push(b);
+    } else if (item.kind === 'skill' && (action === 'enable' || action === 'disable')) {
       const b = await writeSettings(availability.target, (d) => setSkillOverride(d, item.key, action === 'disable' ? 'off' : undefined), deps);
       if (b) backups.push(b);
     } else if (item.kind === 'agent' && action === 'disable') {

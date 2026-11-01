@@ -2,6 +2,20 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-009 · Plugins go through the claude CLI, with our own backup first (2026-11-01)
+- **Commands:**
+  - Enable and disable run `claude plugin enable|disable <id> --scope <scope> --json`.
+  - Delete runs `claude plugin uninstall … --keep-data`. Keeping the plugin's data dir means a reinstall gets its state back.
+- **ID safety:** plugin ids must match `name@marketplace` (`SAFE_PLUGIN_ID`) before they reach the CLI. With no shell, injection isn't possible, but an "id" like `-a` would be read as a *flag*, and `plugin disable -a` disables **all** plugins. The check runs in both `rules.ts` and the executor.
+- **Scope limits (v1):**
+  - Only **user**-scope plugins are changeable.
+  - Project scope would rewrite the team-shared `.claude/settings.json`.
+  - Synced plugins belong to claude.ai.
+  - Local scope waits for project view (M7).
+- **Bug found in the live test:** the first real disable logged `backups: []`. The CLI writes `settings.json` itself, so our backup step never ran (an I1 violation). Fixed with `backupSettingsFile()` before every plugin command. The re-enable then produced a backup.
+- **Observation:** after a real off and on of `frontend-design`, `settings.json` was **deep-equal** to the original, but its top-level key *order* had changed. That reordering comes from Claude Code's own settings writer: our writer keeps key order, as D-008 proved byte-for-byte. Key order has no meaning in JSON settings, so this is harmless. Don't compare plugin round-trips by hash.
+- **Speed:** a plugin change takes about 8–15 s: `plugin list`, then the command, then `plugin list` and a page refresh. That's slower while the MCP health check runs.
+
 ## D-008 · Toggles leave no trace when reversed; file reads run in parallel (2026-11-01)
 - **Commands:** `skillOverrides` turns off a standalone **command** too. A probe showed `ccp-cmd` gone from `slash_commands`. So commands share the skill switch.
 - **Clean reversal:** removing an override or deny rule also removes the container (`skillOverrides`, `permissions.deny`, `permissions`), but only when *that removal* emptied it. Containers the user already had empty are kept.

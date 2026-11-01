@@ -95,6 +95,16 @@ async function atomicWrite(path: string, text: string): Promise<void> {
 }
 
 /**
+ * Back up a settings file that something else (the claude CLI) is about to change (I1).
+ * Returns undefined when the file doesn't exist yet.
+ */
+export async function backupSettingsFile(path: string, opts: UpdateOptions): Promise<string | undefined> {
+  if (!opts.isAllowed(path)) throw new SettingsWriteError(`Refusing to back up ${path}: not on the allow-list`);
+  const original = await readText(path);
+  return original === null ? undefined : backupFile(original, opts);
+}
+
+/**
  * Apply `mutate` to the JSON object in `path`. `mutate` receives a copy and changes it in place.
  * If the file changes on disk while we work (e.g. Claude Code saved it), we start over on the new content.
  */

@@ -58,9 +58,42 @@ function agentActions(item: Item, ctx: RuleContext): Actions {
   return { enable: yes(files.join(', ')), disable: no('Already blocked.') };
 }
 
+/**
+ * Plugin ids are passed to the CLI as an argument. Even without a shell, an "id" starting with "-"
+ * would be read as a flag (`disable -a` disables ALL plugins), so only name@marketplace shapes pass.
+ */
+export const SAFE_PLUGIN_ID = /^[A-Za-z0-9][\w.-]*@[A-Za-z0-9][\w.-]*$/;
+
+function pluginActions(item: Item): Actions {
+  if (!SAFE_PLUGIN_ID.test(item.key)) {
+    const reason = `Unexpected plugin id "${item.key}"; refusing to pass it to the claude CLI.`;
+    return { enable: no(reason), disable: no(reason), delete: no(reason) };
+  }
+  if (item.scope === 'synced') {
+    const reason = 'Synced from your claude.ai account: manage it there.';
+    return { enable: no(reason), disable: no(reason), delete: no(reason) };
+  }
+  if (item.scope === 'project') {
+    const reason = 'Installed for the whole project (in its shared .claude/settings.json), so changing it would affect your team.';
+    return { enable: no(reason), disable: no(reason), delete: no(reason) };
+  }
+  if (item.scope !== 'user') {
+    // Local-scope plugins are stored in a project's settings.local.json, which needs project view (M7).
+    const reason = 'Installed for one project only; changing it arrives with project view.';
+    return { enable: no(reason), disable: no(reason), delete: no(reason) };
+  }
+  const cmd = (verb: string) => `claude plugin ${verb} ${item.key} --scope ${item.scope}`;
+  return {
+    enable: item.state === 'on' ? no('Already on.') : yes(cmd('enable')),
+    disable: item.state === 'on' ? yes(cmd('disable')) : no('Already off.'),
+    delete: yes(`${cmd('uninstall')} --keep-data`),
+  };
+}
+
 const PLUGIN_PART = 'Part of a plugin: it can only be turned off by disabling the whole plugin.';
 
 export function actionsFor(item: Item, ctx: RuleContext): Actions {
+  if (item.kind === 'plugin') return pluginActions(item);
   if (item.origin.type === 'plugin') return { enable: no(PLUGIN_PART), disable: no(PLUGIN_PART), delete: no(PLUGIN_PART) };
   if (item.kind === 'skill' && item.scope === 'user') return skillActions(item, ctx);
   if (item.kind === 'agent' && item.scope === 'user') return agentActions(item, ctx);

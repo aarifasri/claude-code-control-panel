@@ -81,23 +81,45 @@ function toast(message, kind = 'ok') {
   toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 12000 : 7000);
 }
 
+/** Ask before an irreversible action. Uses a native <dialog>, not window.confirm(). */
+function confirmDialog(title, message, confirmLabel) {
+  const dialog = $('#confirm');
+  dialog.querySelector('h2').textContent = title;
+  dialog.querySelector('p').textContent = message;
+  dialog.querySelector('[value=confirm]').textContent = confirmLabel;
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true }));
+}
+
 async function act(item, action) {
   if (state.pendingId) return;
+  if (action === 'delete') {
+    const ok = await confirmDialog(
+      `Uninstall ${item.name}?`,
+      `This runs "${item.actions.delete.target}". The plugin's saved data is kept, but this app can't undo the uninstall: you would reinstall it with /plugin in Claude Code.`,
+      'Uninstall',
+    );
+    if (!ok) return;
+  }
   state.pendingId = item.id;
   render();
   try {
     const res = await fetch('/api/actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CCP-Token': TOKEN },
-      body: JSON.stringify({ itemId: item.id, action }),
+      body: JSON.stringify({ itemId: item.id, action, ...(action === 'delete' ? { confirm: true } : {}) }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error?.message ?? `HTTP ${res.status}`);
     const i = state.items.findIndex((x) => x.id === item.id);
     if (body.item && i !== -1) state.items[i] = body.item;
     else if (i !== -1) state.items.splice(i, 1);
+    if (!body.item && state.selectedId === item.id) state.selectedId = null;
+    // A plugin change also changes the state of everything inside it: reload the list.
+    if (item.kind === 'plugin') state.items = (await getJson('/api/inventory')).items;
     state.restartNeeded ||= body.restartNeeded;
-    const now = body.item ? STATE_LABEL[body.item.state].replace(/^\S+ /, '').toLowerCase() : 'removed';
+    const now = body.item ? STATE_LABEL[body.item.state].replace(/^\S+ /, '').toLowerCase() : action === 'delete' ? 'uninstalled' : 'removed';
     const parts = [`${item.name} is now ${now}.`, ...body.warnings];
     if (body.backups.length) parts.push(`Backup: ${body.backups.join(', ')}`);
     toast(parts.join(' '), body.warnings.length ? 'warn' : 'ok');
@@ -270,12 +292,16 @@ function renderDetail() {
     type: 'button', class: 'primary', disabled: state.pendingId ? true : undefined, onclick: () => act(item, action),
   }, state.pendingId === item.id ? 'Working…' : action === 'disable' ? (item.kind === 'agent' ? 'Block this agent' : 'Turn off') : (item.kind === 'agent' ? 'Unblock this agent' : 'Turn on')) : null;
   const target = action ? item.actions[action].target : null;
+  const uninstall = item.kind === 'plugin' && item.actions.delete?.allowed
+    ? el('button', { type: 'button', class: 'danger', disabled: state.pendingId ? true : undefined, onclick: () => act(item, 'delete') }, 'Uninstall…')
+    : null;
 
   // replaceChildren() would print null as text, so build the list through el()'s null filtering.
   $('#detail').replaceChildren(...el('div', {},
     el('h2', {}, item.name),
     el('dl', {}, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])),
-    button ? el('div', { class: 'actions' }, button, el('p', { class: 'muted small' }, `Changes ${target} (backed up first).`)) : null,
+    button || uninstall ? el('div', { class: 'actions' }, button, uninstall,
+      target ? el('p', { class: 'muted small' }, item.kind === 'plugin' ? `Runs: ${target}` : `Changes ${target} (backed up first).`) : null) : null,
     top ? [el('h3', {}, 'Largest always-on components'), el('ol', { class: 'top' }, top.map((c) => el('li', {}, `${c.name} — ${fmtTokens(c.alwaysOn)}`)))] : null,
     note ? el('p', { class: 'muted' }, note) : null,
   ).childNodes);
