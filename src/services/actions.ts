@@ -7,7 +7,8 @@ import { backupSettingsFile, updateSettingsFile, type JsonObject } from '../adap
 import { SAFE_PLUGIN_ID } from '../domain/rules.ts';
 import { agentRuleMatches, denyRules } from '../domain/effective.ts';
 import { projectHash } from '../domain/ids.ts';
-import { isAllowedSettingsFile, userSettingsPath, type WriteScope } from '../domain/paths.ts';
+import { moveToTrash, restoreFromTrash, type TrashEntry, type TrashKind, type TrashOptions } from '../adapters/trash.ts';
+import { isAllowedSettingsFile, isTrashableSource, userSettingsPath, type WriteScope } from '../domain/paths.ts';
 import { addAgentDeny, removeAgentDeny, setSkillOverride } from '../domain/mutations.ts';
 import type { ActionName, Item, ItemState } from '../domain/types.ts';
 import type { Inventory } from './inventory.ts';
@@ -26,6 +27,17 @@ export interface ActionResult {
   backups: string[];
   warnings: string[];
   restartNeeded: boolean;
+  /** Set when the item was moved to the trash; its id restores it. */
+  trashEntry?: TrashEntry;
+}
+
+export function trashOptions(deps: Pick<ActionDeps, 'home' | 'appDir' | 'projects'>): TrashOptions {
+  const scope: WriteScope = { home: deps.home, appDir: deps.appDir, projects: deps.projects };
+  return { trashDir: join(deps.appDir, 'trash'), isAllowedSource: (p, kind) => isTrashableSource(p, kind, scope) };
+}
+
+function trashKind(item: Item): TrashKind {
+  return item.variant === 'command' ? 'command' : item.kind === 'agent' ? 'agent' : 'skill';
 }
 
 export class ActionFailed extends Error {}
@@ -91,9 +103,13 @@ export async function executeAction(item: Item, action: ActionName, inv: Invento
   const availability = item.actions[action];
   if (!availability?.allowed) throw new ActionFailed(availability?.reason ?? 'Not allowed');
   const backups: string[] = [];
+  let trashEntry: TrashEntry | undefined;
 
   try {
-    if (item.kind === 'plugin') {
+    if (action === 'delete' && (item.kind === 'skill' || item.kind === 'agent')) {
+      if (!item.path) throw new ActionFailed('No file location known for this item.');
+      trashEntry = await moveToTrash({ kind: trashKind(item), key: item.key, name: item.name, itemId: item.id, path: item.path }, trashOptions(deps));
+    } else if (item.kind === 'plugin') {
       const b = await pluginCommand(item, action, deps);
       if (b) backups.push(b);
     } else if (item.kind === 'skill' && (action === 'enable' || action === 'disable')) {
@@ -125,6 +141,26 @@ export async function executeAction(item: Item, action: ActionName, inv: Invento
     const why = fresh.stateSource ? `${fresh.stateSource.detail} in ${fresh.stateSource.file}` : 'another setting';
     warnings.push(`Saved, but it is still ${fresh.state}: ${why} takes priority.`);
   }
-  await log(deps, { action, itemId: item.id, ok: true, state: fresh?.state, backups });
-  return { item: fresh, backups, warnings, restartNeeded: true };
+  if (trashEntry) warnings.push(...leftoverSettingsNotes(item));
+  await log(deps, { action, itemId: item.id, ok: true, state: fresh?.state, backups, ...(trashEntry ? { trashed: trashEntry.trashedPath } : {}) });
+  return { item: fresh, backups, warnings, restartNeeded: true, ...(trashEntry ? { trashEntry } : {}) };
+}
+
+/** A deleted item's override / deny rule stays in settings (harmless, and re-applies on restore). */
+function leftoverSettingsNotes(item: Item): string[] {
+  if (item.state === 'on' || !item.stateSource || item.stateSource.level === 'cli') return [];
+  return [`Its setting (${item.stateSource.detail}) is kept, so it comes back the same way if you restore it.`];
+}
+
+export async function restoreAction(entryId: string, deps: ActionDeps): Promise<ActionResult> {
+  let entry: TrashEntry;
+  try {
+    entry = await restoreFromTrash(entryId, trashOptions(deps));
+  } catch (e) {
+    await log(deps, { action: 'restore', trashId: entryId, ok: false, error: (e as Error).message });
+    throw e;
+  }
+  const fresh = (await deps.inventory()).items.find((i) => i.id === entry.itemId) ?? null;
+  await log(deps, { action: 'restore', itemId: entry.itemId, ok: true, restored: entry.originalPath });
+  return { item: fresh, backups: [], warnings: fresh ? [] : ['Restored, but it did not reappear under the same id. Refresh the page.'], restartNeeded: true };
 }

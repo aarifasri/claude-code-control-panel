@@ -36,6 +36,25 @@ export function isAllowedSettingsFile(path: string, scope: WriteScope): boolean 
   return allowedSettingsFiles(scope).some((p) => norm(p, ci) === target);
 }
 
+/**
+ * Whether a standalone item may be moved to (or restored into) this path (I2): exactly one level
+ * inside `<root>/skills` (a skill folder) or `<root>/agents` / `<root>/commands` (an .md file),
+ * where root is ~/.claude or an allowed project's .claude.
+ */
+export function isTrashableSource(path: string, kind: 'skill' | 'agent' | 'command', scope: WriteScope): boolean {
+  const ci = scope.caseInsensitive ?? process.platform === 'win32';
+  const target = norm(path, ci);
+  const roots = [join(scope.home, '.claude'), ...scope.projects.map((p) => join(p, '.claude'))].map((r) => norm(r, ci));
+  const sub = kind === 'skill' ? 'skills' : kind === 'agent' ? 'agents' : 'commands';
+  return roots.some((root) => {
+    const prefix = `${root}/${sub}/`;
+    if (!target.startsWith(prefix)) return false;
+    const rest = target.slice(prefix.length);
+    if (rest === '' || rest.includes('/')) return false;
+    return kind === 'skill' ? true : rest.endsWith('.md');
+  });
+}
+
 /** True for paths strictly inside the app folder (never the folder itself, never via `..`). */
 export function isInsideAppDir(path: string, scope: WriteScope): boolean {
   const ci = scope.caseInsensitive ?? process.platform === 'win32';

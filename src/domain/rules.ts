@@ -95,7 +95,8 @@ const PLUGIN_PART = 'Part of a plugin: it can only be turned off by disabling th
 export function actionsFor(item: Item, ctx: RuleContext): Actions {
   if (item.kind === 'plugin') return pluginActions(item);
   if (item.origin.type === 'plugin') return { enable: no(PLUGIN_PART), disable: no(PLUGIN_PART), delete: no(PLUGIN_PART) };
-  if (item.kind === 'skill' && item.scope === 'user') return skillActions(item, ctx);
-  if (item.kind === 'agent' && item.scope === 'user') return agentActions(item, ctx);
+  const toTrash = item.path ? yes('Move to the control panel trash (can be restored)') : no('No file location known.');
+  if (item.kind === 'skill' && item.scope === 'user') return { ...skillActions(item, ctx), delete: toTrash };
+  if (item.kind === 'agent' && item.scope === 'user') return { ...agentActions(item, ctx), delete: toTrash };
   return {};
 }

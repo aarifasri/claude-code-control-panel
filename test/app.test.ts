@@ -127,6 +127,36 @@ test('agent blocked and unblocked, end to end', async () => {
   assert.equal(log.trim().split('\n').length, 2, 'both actions logged');
 });
 
+test('delete a skill to trash, list it, restore it (end to end)', async () => {
+  const { post, base, home } = await start();
+  const del = await post({ itemId: 'skill:user:s1', action: 'delete', confirm: true });
+  assert.equal(del.status, 200);
+  const body = await del.json();
+  assert.equal(body.item, null);
+  assert.ok(body.trashEntry.id);
+
+  const inv = await (await fetch(`${base}/api/inventory`)).json();
+  assert.equal(inv.items.some((i: { id: string }) => i.id === 'skill:user:s1'), false);
+  const trash = await (await fetch(`${base}/api/trash`)).json();
+  assert.equal(trash.entries.length, 1);
+
+  const restored = await (await post({ itemId: `trash:${body.trashEntry.id}`, action: 'restore' })).json();
+  assert.equal(restored.item.id, 'skill:user:s1');
+  assert.match(await readFile(join(home, '.claude', 'skills', 's1', 'SKILL.md'), 'utf8'), /A skill/);
+});
+
+test('restore conflict → 409; bad trash ids → 400/404', async () => {
+  const { post, home } = await start();
+  const { trashEntry } = await (await post({ itemId: 'skill:user:s1', action: 'delete', confirm: true })).json();
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(home, '.claude', 'skills', 's1'));
+  const conflict = await post({ itemId: `trash:${trashEntry.id}`, action: 'restore' });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'restore-conflict');
+  assert.equal((await post({ itemId: 'trash:../../x', action: 'restore' })).status, 400);
+  assert.equal((await post({ itemId: 'trash:unknown', action: 'restore' })).status, 404);
+});
+
 /** Fake CLI that behaves like the real one for plugin list/enable/disable/uninstall. */
 function pluginCli(options: { failVerb?: string } = {}) {
   const plugins = [{ id: 'fd@official', version: '1.0.0', scope: 'user', enabled: true, installPath: '' }];

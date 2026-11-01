@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { readClaudeJsonSummary } from './adapters/claudeJson.ts';
 import { CliError, listPlugins, type ClaudeCli, type InstalledPlugin } from './adapters/cli.ts';
 import type { ActionName } from './domain/types.ts';
-import { executeAction } from './services/actions.ts';
+import { listTrash, TrashError } from './adapters/trash.ts';
+import { executeAction, restoreAction, trashOptions } from './services/actions.ts';
 import { getCosts } from './services/costs.ts';
 import { buildInventory } from './services/inventory.ts';
 import { ActionLock } from './services/lock.ts';
@@ -117,6 +118,30 @@ export function createApp(config: AppConfig) {
     if (typeof action !== 'string' || !ACTIONS.includes(action as ActionName)) throw new HttpError(400, 'invalid-request', `action must be one of ${ACTIONS.join(', ')}`);
     if (action === 'delete' && confirm !== true) throw new HttpError(400, 'invalid-request', 'Deleting requires confirm: true');
 
+    const deps = (inv?: { plugins: InstalledPlugin[] }) => ({
+      cli: config.cli, home: config.home, appDir: config.appDir, projects: [] as string[],
+      inventory: inv ? () => inventory(inv.plugins) : () => inventory(),
+    });
+
+    if (action === 'restore') {
+      // Trashed items aren't in the inventory; they're addressed by their trash entry id.
+      const m = /^trash:([\w-]{1,80})$/.exec(itemId);
+      if (!m) throw new HttpError(400, 'invalid-request', 'restore needs itemId "trash:<entry id>"');
+      const restored = await lock.tryRun(async () => {
+        try {
+          return await restoreAction(m[1]!, deps());
+        } catch (e) {
+          if (e instanceof TrashError) {
+            const status = e.code === 'missing' ? 404 : e.code === 'failed' ? 500 : 409;
+            throw new HttpError(status, e.code === 'conflict' ? 'restore-conflict' : e.code === 'missing' ? 'unknown-item' : 'not-allowed', e.message);
+          }
+          throw new HttpError(500, 'action-failed', (e as Error).message);
+        }
+      });
+      if (!restored.ran) throw new HttpError(423, 'busy', 'Another change is still running. Try again in a moment.');
+      return json(res, 200, restored.value);
+    }
+
     const outcome = await lock.tryRun(async () => {
       // I3: look the item up in a fresh inventory; never trust names or paths from the browser.
       const inv = await inventory();
@@ -128,8 +153,7 @@ export function createApp(config: AppConfig) {
       }
       try {
         // Skill/agent changes can't affect plugins, so the re-read reuses the plugin list (much faster).
-        const reread = item.kind === 'plugin' ? () => inventory() : () => inventory(inv.plugins);
-        return await executeAction(item, action as ActionName, inv, { cli: config.cli, home: config.home, appDir: config.appDir, projects: [], inventory: reread });
+        return await executeAction(item, action as ActionName, inv, deps(item.kind === 'plugin' ? undefined : inv));
       } catch (e) {
         throw new HttpError(500, 'action-failed', (e as Error).message);
       }
@@ -178,6 +202,10 @@ export function createApp(config: AppConfig) {
       } catch (e) {
         throw new HttpError(500, 'mcp-failed', (e as Error).message);
       }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/trash') {
+      return json(res, 200, { entries: await listTrash(trashOptions({ home: config.home, appDir: config.appDir, projects: [] })) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/actions') return handleAction(req, res);

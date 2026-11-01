@@ -8,6 +8,7 @@ const state = {
   mcp: null, mcpError: null,              // McpItem[]
   pendingId: null,                        // item with an action in flight
   restartNeeded: false,
+  trash: [],                              // TrashEntry[]
 };
 const $ = (sel) => document.querySelector(sel);
 const TOKEN = document.querySelector('meta[name="ccp-token"]')?.content ?? '';
@@ -23,6 +24,11 @@ function el(tag, attrs = {}, ...children) {
   }
   for (const c of children.flat(Infinity)) if (c !== null && c !== undefined) node.append(typeof c === 'string' ? document.createTextNode(c) : c);
   return node;
+}
+
+/** Replace a node's children, skipping null/undefined (replaceChildren would print them as "null"). */
+function fill(node, ...children) {
+  node.replaceChildren(...children.flat(Infinity).filter((c) => c !== null && c !== undefined));
 }
 
 const STATE_LABEL = { on: '● On', off: '○ Off', blocked: '⊘ Blocked', partial: '◐ Partial', unknown: '? Unknown' };
@@ -72,13 +78,51 @@ function lockedReason(item) {
 }
 
 let toastTimer;
-function toast(message, kind = 'ok') {
+/** Show a message; `undo` adds a button that runs it (e.g. restore from trash). */
+function toast(message, kind = 'ok', undo = null) {
   const t = $('#toast');
   t.className = `toast toast-${kind}`;
-  t.textContent = message;
+  fill(t, el('span', {}, message), undo ? el('button', { type: 'button', class: 'undo', onclick: () => { t.hidden = true; undo(); } }, 'Undo') : null);
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 12000 : 7000);
+  toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 12000 : undo ? 15000 : 7000);
+}
+
+async function post(body) {
+  const res = await fetch('/api/actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CCP-Token': TOKEN },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
+  return json;
+}
+
+async function loadTrash() {
+  try {
+    state.trash = (await getJson('/api/trash')).entries;
+  } catch {
+    state.trash = [];
+  }
+}
+
+async function restore(entry) {
+  if (state.pendingId) return;
+  state.pendingId = `trash:${entry.id}`;
+  render();
+  try {
+    const body = await post({ itemId: `trash:${entry.id}`, action: 'restore' });
+    state.items = (await getJson('/api/inventory')).items;
+    await loadTrash();
+    state.restartNeeded ||= body.restartNeeded;
+    toast([`${entry.name} restored to ${entry.originalPath}.`, ...body.warnings].join(' '), body.warnings.length ? 'warn' : 'ok');
+  } catch (e) {
+    toast(`Couldn't restore ${entry.name}: ${e.message}`, 'error');
+  } finally {
+    state.pendingId = null;
+    render();
+  }
 }
 
 /** Ask before an irreversible action. Uses a native <dialog>, not window.confirm(). */
@@ -95,23 +139,21 @@ function confirmDialog(title, message, confirmLabel) {
 async function act(item, action) {
   if (state.pendingId) return;
   if (action === 'delete') {
-    const ok = await confirmDialog(
-      `Uninstall ${item.name}?`,
-      `This runs "${item.actions.delete.target}". The plugin's saved data is kept, but this app can't undo the uninstall: you would reinstall it with /plugin in Claude Code.`,
-      'Uninstall',
-    );
+    const ok = item.kind === 'plugin'
+      ? await confirmDialog(
+        `Uninstall ${item.name}?`,
+        `This runs "${item.actions.delete.target}". The plugin's saved data is kept, but this app can't undo the uninstall: you would reinstall it with /plugin in Claude Code.`,
+        'Uninstall')
+      : await confirmDialog(
+        `Move ${item.name} to the trash?`,
+        `${item.path} moves to the control panel's trash folder. You can restore it from the Trash tab.`,
+        'Move to trash');
     if (!ok) return;
   }
   state.pendingId = item.id;
   render();
   try {
-    const res = await fetch('/api/actions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CCP-Token': TOKEN },
-      body: JSON.stringify({ itemId: item.id, action, ...(action === 'delete' ? { confirm: true } : {}) }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+    const body = await post({ itemId: item.id, action, ...(action === 'delete' ? { confirm: true } : {}) });
     const i = state.items.findIndex((x) => x.id === item.id);
     if (body.item && i !== -1) state.items[i] = body.item;
     else if (i !== -1) state.items.splice(i, 1);
@@ -119,6 +161,11 @@ async function act(item, action) {
     // A plugin change also changes the state of everything inside it: reload the list.
     if (item.kind === 'plugin') state.items = (await getJson('/api/inventory')).items;
     state.restartNeeded ||= body.restartNeeded;
+    if (body.trashEntry) {
+      await loadTrash();
+      toast([`${item.name} moved to the trash.`, ...body.warnings].join(' '), 'ok', () => restore(body.trashEntry));
+      return;
+    }
     const now = body.item ? STATE_LABEL[body.item.state].replace(/^\S+ /, '').toLowerCase() : action === 'delete' ? 'uninstalled' : 'removed';
     const parts = [`${item.name} is now ${now}.`, ...body.warnings];
     if (body.backups.length) parts.push(`Backup: ${body.backups.join(', ')}`);
@@ -163,7 +210,7 @@ async function load() {
   $('#error').hidden = true;
   state.costs = state.mcp = state.costsError = state.mcpError = null;
   try {
-    state.items = (await getJson('/api/inventory')).items;
+    [state.items] = await Promise.all([getJson('/api/inventory').then((b) => b.items), loadTrash()]);
     renderSourceFilter();
     render();
   } catch (e) {
@@ -224,9 +271,14 @@ function render() {
     const kind = tab.dataset.tab;
     tab.setAttribute('aria-selected', String(kind === state.tab));
     const loading = kind === 'mcp' && !state.mcp;
-    tab.querySelector('.count').textContent = loading ? (state.mcpError ? '(!)' : '(…)') : `(${allItems().filter((i) => i.kind === kind).length})`;
+    const count = kind === 'trash' ? state.trash.length : allItems().filter((i) => i.kind === kind).length;
+    tab.querySelector('.count').textContent = loading ? (state.mcpError ? '(!)' : '(…)') : `(${count})`;
   }
   renderSummary();
+  renderDetail();
+  const heads = state.tab === 'trash' ? ['Action', 'Name', 'Type', 'Scope', 'Deleted'] : ['State', 'Name', 'Source', 'Scope', 'Always-on'];
+  document.querySelectorAll('thead th').forEach((th, i) => { th.textContent = heads[i]; });
+  if (state.tab === 'trash') return renderTrash();
 
   const rows = filtered();
   $('#rows').replaceChildren(...rows.map((item) => {
@@ -252,7 +304,27 @@ function render() {
   empty.textContent = mcpPending
     ? (state.mcpError ? `Could not list MCP servers: ${state.mcpError}` : 'Checking MCP servers… (Claude Code health-checks each one; this can take 20–60 seconds.)')
     : $('#search').value ? `No matches for "${$('#search').value}".` : 'Nothing here.';
-  if (state.selectedId) renderDetail();
+}
+
+function renderTrash() {
+  const q = $('#search').value.trim().toLowerCase();
+  const entries = state.trash
+    .filter((e) => !q || e.name.toLowerCase().includes(q) || e.originalPath.toLowerCase().includes(q))
+    .sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
+  $('#rows').replaceChildren(...entries.map((e) => el('tr', {},
+    el('td', {}, el('button', {
+      type: 'button', class: 'switch', disabled: state.pendingId ? true : undefined,
+      'aria-label': `Restore ${e.name} to ${e.originalPath}`, onclick: () => restore(e),
+    }, state.pendingId === `trash:${e.id}` ? 'Restoring…' : 'Restore')),
+    el('td', {}, el('strong', {}, e.name), el('div', { class: 'desc' }, `Was at ${e.originalPath}`)),
+    el('td', {}, e.kind),
+    el('td', {}, 'user'),
+    el('td', { class: 'num' }, new Date(e.trashedAt).toLocaleString()),
+  )));
+  const empty = $('#empty');
+  empty.hidden = entries.length > 0;
+  empty.textContent = q ? `No trashed items match "${$('#search').value}".`
+    : 'The trash is empty. Items you delete here are moved to ~/.claude-control-panel/trash and can be restored.';
 }
 
 function select(id) {
@@ -261,8 +333,12 @@ function select(id) {
 }
 
 function renderDetail() {
-  const item = allItems().find((i) => i.id === state.selectedId);
-  if (!item) return;
+  const item = state.selectedId ? allItems().find((i) => i.id === state.selectedId) : undefined;
+  if (!item) {
+    // Nothing selected, or the selected item was deleted/uninstalled.
+    $('#detail').replaceChildren(el('p', { class: 'muted' }, 'Select an item to see what it does.'));
+    return;
+  }
   const cost = costOf(item);
   const pluginCost = item.kind === 'plugin' ? state.costs?.[item.key] : undefined;
   const rows = [
@@ -292,23 +368,23 @@ function renderDetail() {
     type: 'button', class: 'primary', disabled: state.pendingId ? true : undefined, onclick: () => act(item, action),
   }, state.pendingId === item.id ? 'Working…' : action === 'disable' ? (item.kind === 'agent' ? 'Block this agent' : 'Turn off') : (item.kind === 'agent' ? 'Unblock this agent' : 'Turn on')) : null;
   const target = action ? item.actions[action].target : null;
-  const uninstall = item.kind === 'plugin' && item.actions.delete?.allowed
-    ? el('button', { type: 'button', class: 'danger', disabled: state.pendingId ? true : undefined, onclick: () => act(item, 'delete') }, 'Uninstall…')
+  const uninstall = item.actions.delete?.allowed
+    ? el('button', { type: 'button', class: 'danger', disabled: state.pendingId ? true : undefined, onclick: () => act(item, 'delete') },
+      item.kind === 'plugin' ? 'Uninstall…' : 'Move to trash…')
     : null;
 
-  // replaceChildren() would print null as text, so build the list through el()'s null filtering.
-  $('#detail').replaceChildren(...el('div', {},
+  fill($('#detail'),
     el('h2', {}, item.name),
     el('dl', {}, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])),
     button || uninstall ? el('div', { class: 'actions' }, button, uninstall,
       target ? el('p', { class: 'muted small' }, item.kind === 'plugin' ? `Runs: ${target}` : `Changes ${target} (backed up first).`) : null) : null,
     top ? [el('h3', {}, 'Largest always-on components'), el('ol', { class: 'top' }, top.map((c) => el('li', {}, `${c.name} — ${fmtTokens(c.alwaysOn)}`)))] : null,
     note ? el('p', { class: 'muted' }, note) : null,
-  ).childNodes);
+  );
 }
 
 for (const tab of document.querySelectorAll('[role=tab]')) {
-  tab.addEventListener('click', () => { state.tab = tab.dataset.tab; state.selectedId = null; $('#detail').replaceChildren(el('p', { class: 'muted' }, 'Select an item to see what it does.')); render(); });
+  tab.addEventListener('click', () => { state.tab = tab.dataset.tab; state.selectedId = null; render(); });
 }
 for (const id of ['#search', '#f-state', '#f-source', '#sort']) $(id).addEventListener('input', render);
 $('#refresh').addEventListener('click', load);

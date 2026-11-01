@@ -57,5 +57,10 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - `backupSettingsFile()` runs before every plugin command, because the CLI writes `settings.json` itself.
 - Claude Code's writer may reorder top-level keys. The content stays deep-equal.
 
+## Trash (M6, D-010)
+- `src/adapters/trash.ts`: `moveToTrash`, `restoreFromTrash`, `listTrash`. Storage is `~/.claude-control-panel/trash/` plus `manifest.json`.
+- Restore uses itemId `trash:<entry id>`, because trashed items aren't in the inventory. Restore returns 409 `restore-conflict` instead of overwriting.
+- UI rule: use `fill()`, not `replaceChildren()`, whenever a child may be null.
+
 ## Current status
-M0–M5 are done: skills, commands, agents and user-scope plugins can all be switched from the page. **Next: M6**, a trash folder for deleting standalone skills and agents, with restore.
+M0–M6 are done: switch skills, commands, agents and user-scope plugins; delete standalone items to the trash and restore them. **Next: M7**, project scope.

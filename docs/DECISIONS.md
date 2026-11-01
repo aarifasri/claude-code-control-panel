@@ -2,6 +2,20 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-010 · Trash: record first, then move; check both ends on restore (2026-11-01)
+- **Delete** moves a standalone skill folder, or an agent or command `.md` file, into `~/.claude-control-panel/trash/<time>_<rand>/<name>`. The entry goes into `trash/manifest.json` *before* the move: if the move fails, the entry is removed again; if the app crashes after the move, the entry still says where the item belongs.
+- **Allowed sources** (`isTrashableSource`): exactly one level inside `<root>/skills/`, or a `.md` file directly in `<root>/agents/` or `<root>/commands/`. Plugin files never qualify.
+- **Restore** re-checks both ends, because `manifest.json` is a file on disk and could be edited:
+  - The destination must be an allowed source.
+  - The trashed copy must be exactly `<trashDir>/<slot>/<name>`.
+  - Tests prove a tampered manifest can't move or remove other folders.
+- **Conflicts:** restore refuses when something now exists at the original path (BR-8), and keeps the trashed copy.
+- **Settings left in place:** a deleted item's `skillOverrides` entry or deny rule stays in settings. It's harmless and re-applies on restore, and the toast says so.
+- **Live test:**
+  - A throwaway skill folder with a nested file was moved to the trash and restored through the page.
+  - Every file's SHA-256 matched afterwards, and the trash slot and manifest entry were cleaned up.
+- **Not in v1:** emptying the trash. The user can delete `~/.claude-control-panel/trash` by hand.
+
 ## D-009 · Plugins go through the claude CLI, with our own backup first (2026-11-01)
 - **Commands:**
   - Enable and disable run `claude plugin enable|disable <id> --scope <scope> --json`.
