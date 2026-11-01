@@ -4,6 +4,7 @@ import type { ClaudeCli, InstalledPlugin } from '../adapters/cli.ts';
 import type { ClaudeJsonSummary } from '../adapters/claudeJson.ts';
 import { parseMcpList, type McpEntry, type McpStatus } from '../adapters/parsers/mcpList.ts';
 import { itemId } from '../domain/ids.ts';
+import { actionsFor, type RuleContext } from '../domain/rules.ts';
 import type { Item, ItemState, Scope } from '../domain/types.ts';
 
 export interface McpItem extends Item {
@@ -28,8 +29,35 @@ function scopeOf(e: McpEntry, summary: ClaudeJsonSummary, cwd: string): Scope {
   return 'project';
 }
 
-export async function listMcp(opts: { cli: ClaudeCli; summary: ClaudeJsonSummary; plugins: InstalledPlugin[]; cwd: string }): Promise<{ items: McpItem[]; unparsed: string[] }> {
-  const res = await opts.cli.run(['mcp', 'list'], 180_000);
+/** Rule context for MCP items: they never write settings files, only call the CLI. */
+function mcpRuleContext(project: string | undefined): RuleContext {
+  return { layers: [], targetFile: '', isWritable: () => false, ...(project ? { project } : {}) };
+}
+
+function sameFolder(a: string, b: string): boolean {
+  const n = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return n(a) === n(b);
+}
+
+/**
+ * Configured (non-plugin, non-connector) MCP servers straight from ~/.claude.json, without the slow
+ * health check. Used to validate a remove request against fresh data (I3).
+ */
+export function configuredMcpItems(summary: ClaudeJsonSummary, project: string | undefined): Item[] {
+  const local = project ? Object.entries(summary.localMcpServers).find(([p]) => sameFolder(p, project))?.[1] ?? [] : [];
+  const entries: [string, Scope][] = [...summary.userMcpServers.map((n): [string, Scope] => [n, 'user']), ...local.map((n): [string, Scope] => [n, 'local'])];
+  return entries.map(([name, scope]) => {
+    const item: Item = {
+      id: itemId('mcp', scope, name), kind: 'mcp', key: name, name, description: '', scope,
+      origin: { type: 'standalone' }, state: 'unknown', actions: {}, warnings: [],
+    };
+    item.actions = actionsFor(item, mcpRuleContext(project));
+    return item;
+  });
+}
+
+export async function listMcp(opts: { cli: ClaudeCli; summary: ClaudeJsonSummary; plugins: InstalledPlugin[]; cwd: string; project?: string }): Promise<{ items: McpItem[]; unparsed: string[] }> {
+  const res = await opts.cli.run(['mcp', 'list'], 180_000, opts.cwd);
   if (res.code !== 0) throw new Error(`claude mcp list failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
   const { entries, unparsed } = parseMcpList(res.stdout);
 
@@ -50,5 +78,6 @@ export async function listMcp(opts: { cli: ClaudeCli; summary: ClaudeJsonSummary
       mcp: { target: e.target, ...(e.transport ? { transport: e.transport } : {}), status: e.status, statusText: e.statusText },
     };
   });
+  for (const item of items) item.actions = actionsFor(item, mcpRuleContext(opts.project));
   return { items, unparsed };
 }

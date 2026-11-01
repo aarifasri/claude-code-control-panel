@@ -14,7 +14,7 @@ import { executeAction, restoreAction, trashOptions } from './services/actions.t
 import { getCosts } from './services/costs.ts';
 import { buildInventory } from './services/inventory.ts';
 import { ActionLock } from './services/lock.ts';
-import { listMcp } from './services/mcp.ts';
+import { configuredMcpItems, listMcp } from './services/mcp.ts';
 import { listProjects, resolveProject } from './services/projects.ts';
 
 export interface AppConfig {
@@ -164,7 +164,10 @@ export function createApp(config: AppConfig) {
     const outcome = await lock.tryRun(async () => {
       // I3: look the item up in a fresh inventory; never trust names or paths from the browser.
       const inv = await inventory(project);
-      const item = inv.items.find((i) => i.id === itemId);
+      // MCP servers aren't in the inventory (their health check is slow); look them up in ~/.claude.json.
+      const item = itemId.startsWith('mcp:')
+        ? configuredMcpItems(await readClaudeJsonSummary(config.home), project ?? undefined).find((i) => i.id === itemId)
+        : inv.items.find((i) => i.id === itemId);
       if (!item) throw new HttpError(404, 'unknown-item', 'That item no longer exists. Refresh the page.');
       const availability = item.actions[action as ActionName];
       if (!availability || !availability.allowed) {
@@ -224,7 +227,7 @@ export function createApp(config: AppConfig) {
       try {
         const cwd = project ?? config.cwd;
         const [plugins, summary] = await Promise.all([listPlugins(config.cli, cwd), readClaudeJsonSummary(config.home)]);
-        return json(res, 200, await listMcp({ cli: config.cli, summary, plugins, cwd }));
+        return json(res, 200, await listMcp({ cli: config.cli, summary, plugins, cwd, ...(project ? { project } : {}) }));
       } catch (e) {
         throw new HttpError(500, 'mcp-failed', (e as Error).message);
       }

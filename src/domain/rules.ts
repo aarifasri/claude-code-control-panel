@@ -97,11 +97,41 @@ function pluginActions(item: Item, ctx: RuleContext): Actions {
   };
 }
 
+/** MCP names reach the CLI as an argument; like plugin ids, they must not look like a flag. */
+export const SAFE_MCP_NAME = /^[A-Za-z0-9][\w.-]*$/;
+
+function mcpActions(item: Item, ctx: RuleContext): Actions {
+  const toggle = no('Use /mcp in Claude Code to turn MCP servers on or off.');
+  if (item.origin.type === 'connector') return { enable: toggle, disable: toggle, delete: no('A claude.ai connector: manage it in your claude.ai connector settings.') };
+  if (!SAFE_MCP_NAME.test(item.key)) return { enable: toggle, disable: toggle, delete: no(`Unexpected server name "${item.key}"; refusing to pass it to the claude CLI.`) };
+  if (item.scope === 'project') return { enable: toggle, disable: toggle, delete: no('Defined in the project\'s shared .mcp.json, so removing it would affect your team.') };
+  if (item.scope === 'local' && !ctx.project) return { enable: toggle, disable: toggle, delete: no('Configured for one project only: choose that project in the Scope picker to remove it.') };
+  if (item.scope !== 'user' && item.scope !== 'local') return { enable: toggle, disable: toggle, delete: no(`Unexpected scope "${item.scope}".`) };
+  const where = item.scope === 'local' ? ` (in ${ctx.project})` : '';
+  return { enable: toggle, disable: toggle, delete: yes(`claude mcp remove ${item.key} --scope ${item.scope}${where}`) };
+}
+
+function hookActions(item: Item, ctx: RuleContext): Actions {
+  if (item.key !== '*') {
+    const reason = 'Claude Code can\'t turn off a single hook. Use the "All hooks" switch, or disable the plugin it comes from.';
+    return { enable: no(reason), disable: no(reason) };
+  }
+  if (item.stateSource?.level === 'managed') {
+    const reason = 'Set by your organisation\'s managed settings, which this app can\'t change.';
+    return { enable: no(reason), disable: no(reason) };
+  }
+  return item.state === 'on'
+    ? { disable: yes(ctx.targetFile), enable: no('Already on.') }
+    : { enable: yes(ctx.targetFile), disable: no('Already off.') };
+}
+
 const PLUGIN_PART = 'Part of a plugin: it can only be turned off by disabling the whole plugin.';
 
 export function actionsFor(item: Item, ctx: RuleContext): Actions {
   if (item.kind === 'plugin') return pluginActions(item, ctx);
   if (item.origin.type === 'plugin') return { enable: no(PLUGIN_PART), disable: no(PLUGIN_PART), delete: no(PLUGIN_PART) };
+  if (item.kind === 'mcp') return mcpActions(item, ctx);
+  if (item.kind === 'hook') return hookActions(item, ctx);
   const toTrash = item.path ? yes('Move to the control panel trash (can be restored)') : no('No file location known.');
   const standalone = item.scope === 'user' || (item.scope === 'project' && !!ctx.project);
   if (item.kind === 'skill' && standalone) return { ...skillActions(item, ctx), delete: toTrash };

@@ -2,14 +2,15 @@
 
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readClaudeJsonSummary } from '../adapters/claudeJson.ts';
 import type { ClaudeCli } from '../adapters/cli.ts';
 import { backupSettingsFile, updateSettingsFile, type JsonObject } from '../adapters/settingsFile.ts';
-import { SAFE_PLUGIN_ID } from '../domain/rules.ts';
-import { agentRuleMatches, denyRules, skillEnableValue } from '../domain/effective.ts';
+import { SAFE_MCP_NAME, SAFE_PLUGIN_ID } from '../domain/rules.ts';
+import { agentRuleMatches, denyRules, hooksEnableValue, skillEnableValue } from '../domain/effective.ts';
 import { projectHash } from '../domain/ids.ts';
 import { moveToTrash, restoreFromTrash, type TrashEntry, type TrashKind, type TrashOptions } from '../adapters/trash.ts';
 import { isAllowedSettingsFile, isTrashableSource, projectLocalSettingsPath, userSettingsPath, type WriteScope } from '../domain/paths.ts';
-import { addAgentDeny, removeAgentDeny, setSkillOverride } from '../domain/mutations.ts';
+import { addAgentDeny, removeAgentDeny, setDisableAllHooks, setSkillOverride } from '../domain/mutations.ts';
 import type { ActionName, Item, ItemState } from '../domain/types.ts';
 import type { Inventory } from './inventory.ts';
 
@@ -89,6 +90,32 @@ async function pluginCommand(item: Item, action: ActionName, deps: ActionDeps): 
   return backup;
 }
 
+/**
+ * `claude mcp remove`. User/local servers live in ~/.claude.json, which this app never writes itself;
+ * the CLI does, so we keep a backup copy first (it can hold secrets, so it stays in the app folder).
+ */
+async function mcpRemove(item: Item, deps: ActionDeps): Promise<string | undefined> {
+  if (!SAFE_MCP_NAME.test(item.key)) throw new ActionFailed(`Unexpected server name "${item.key}"`);
+  if (item.scope !== 'user' && item.scope !== 'local') throw new ActionFailed(`Can't remove a ${item.scope}-scope server.`);
+  if (item.scope === 'local' && !deps.project) throw new ActionFailed('Local servers can only be removed in project view.');
+  const claudeJson = join(deps.home, '.claude.json');
+  const backup = await backupSettingsFile(claudeJson, {
+    isAllowed: (p) => p === claudeJson, backupDir: join(deps.appDir, 'backups'), label: 'claude-json',
+  });
+  const res = await deps.cli.run(['mcp', 'remove', item.key, '--scope', item.scope], 60_000, item.scope === 'local' ? deps.project : undefined);
+  if (res.code !== 0) {
+    const detail = (res.stderr || res.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400);
+    throw new ActionFailed(`claude mcp remove failed (exit ${res.code}): ${detail}`);
+  }
+  // I8: check the result on disk rather than trusting the exit code.
+  const after = await readClaudeJsonSummary(deps.home);
+  const still = item.scope === 'user'
+    ? after.userMcpServers.includes(item.key)
+    : Object.entries(after.localMcpServers).some(([p, names]) => deps.project && p.replace(/\\/g, '/').toLowerCase() === deps.project.replace(/\\/g, '/').toLowerCase() && names.includes(item.key));
+  if (still) throw new ActionFailed(`claude mcp remove reported success, but "${item.key}" is still configured.`);
+  return backup;
+}
+
 async function log(deps: ActionDeps, entry: Record<string, unknown>): Promise<void> {
   try {
     await mkdir(deps.appDir, { recursive: true });
@@ -99,8 +126,8 @@ async function log(deps: ActionDeps, entry: Record<string, unknown>): Promise<vo
 }
 
 const EXPECTED: Partial<Record<ActionName, Partial<Record<Item['kind'], ItemState>>>> = {
-  enable: { skill: 'on', agent: 'on', plugin: 'on' },
-  disable: { skill: 'off', agent: 'blocked', plugin: 'off' },
+  enable: { skill: 'on', agent: 'on', plugin: 'on', hook: 'on' },
+  disable: { skill: 'off', agent: 'blocked', plugin: 'off', hook: 'off' },
 };
 
 export async function executeAction(item: Item, action: ActionName, inv: Inventory, deps: ActionDeps): Promise<ActionResult> {
@@ -110,7 +137,14 @@ export async function executeAction(item: Item, action: ActionName, inv: Invento
   let trashEntry: TrashEntry | undefined;
 
   try {
-    if (action === 'delete' && (item.kind === 'skill' || item.kind === 'agent')) {
+    if (item.kind === 'mcp' && action === 'delete') {
+      const b = await mcpRemove(item, deps);
+      if (b) backups.push(b);
+    } else if (item.kind === 'hook' && item.key === '*' && (action === 'enable' || action === 'disable')) {
+      const value = action === 'disable' ? true : hooksEnableValue(inv.layers, availability.target);
+      const b = await writeSettings(availability.target, (d) => setDisableAllHooks(d, value), deps);
+      if (b) backups.push(b);
+    } else if (action === 'delete' && (item.kind === 'skill' || item.kind === 'agent')) {
       if (!item.path) throw new ActionFailed('No file location known for this item.');
       trashEntry = await moveToTrash({ kind: trashKind(item), key: item.key, name: item.name, itemId: item.id, path: item.path }, trashOptions(deps));
     } else if (item.kind === 'plugin') {

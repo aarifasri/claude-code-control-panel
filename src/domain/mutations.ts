@@ -27,6 +27,12 @@ export function setSkillOverride(data: Json, folder: string, value: 'off' | 'on'
   objectAt(data, 'skillOverrides')[folder] = value;
 }
 
+/** Set or remove (undefined) the `disableAllHooks` master switch. */
+export function setDisableAllHooks(data: Json, value: boolean | undefined): void {
+  if (value === undefined) delete data.disableAllHooks;
+  else data.disableAllHooks = value;
+}
+
 function denyList(data: Json, create: boolean): unknown[] | undefined {
   const permissions = create ? objectAt(data, 'permissions') : (data.permissions as Json | undefined);
   if (!permissions || typeof permissions !== 'object') return undefined;

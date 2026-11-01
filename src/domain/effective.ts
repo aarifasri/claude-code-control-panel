@@ -40,6 +40,11 @@ export function skillEnableValue(folder: string, layers: SettingsLayer[], target
   return skillState(folder, layers.filter((l) => l.file !== targetFile)).state === 'on' ? undefined : 'on';
 }
 
+/** What to write to turn all hooks back on: remove our key if that's enough, else an explicit false. */
+export function hooksEnableValue(layers: SettingsLayer[], targetFile: string): false | undefined {
+  return hooksDisabled(layers.filter((l) => l.file !== targetFile)).state === 'on' ? undefined : false;
+}
+
 /** All deny rules in a layer, as strings. */
 export function denyRules(layer: SettingsLayer): string[] {
   const deny = asRecord(layer.data?.permissions)?.deny;

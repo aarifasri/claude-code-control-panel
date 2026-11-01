@@ -2,6 +2,20 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-012 · Hooks are view-only except the master switch; MCP remove goes through the CLI (2026-11-01)
+- **Hooks:**
+  - Listed from every settings layer, plus each plugin's `hooks/hooks.json`. Each handler becomes one view-only item, with secrets in commands masked.
+  - Claude Code has no per-hook switch (BR-6). The only control is an **"All hooks"** item that writes `disableAllHooks`.
+  - Turning hooks back on mirrors skills: remove our key if that's enough, otherwise write `false` (`hooksEnableValue`).
+  - `~/.claude/settings.local.json` also has hooks, but it only applies to sessions started in the home folder, which isn't offered as a project. It isn't counted.
+- **MCP remove:** `claude mcp remove <name> --scope user|local`. Local servers need their project in view, and the command runs there.
+  - Before removing, the app copies `~/.claude.json` to `backups/claude-json.<time>.json`. That copy **can contain MCP secrets** (env, headers), but it stays in the app folder in the user's profile and is never sent to the browser.
+  - Afterwards `~/.claude.json` is re-read to confirm the server is really gone (I8). Removal requests are checked against the names in `~/.claude.json`, so they don't wait for the 45 s health check.
+  - View-only, with reasons: claude.ai connectors, plugin servers, servers in a project's shared `.mcp.json`, and flag-like names (`SAFE_MCP_NAME`).
+- **Live tests:**
+  - "All hooks" off and on through the page: `settings.json`'s SHA-256 was identical afterwards.
+  - A throwaway user-scope server (`ccp-test`, added with `claude mcp add`) was removed through the page. It was gone from `~/.claude.json`, the backup still held it, and the user's three real servers were untouched.
+
 ## D-011 · Project view: personal settings.local.json, CLI runs in the project (2026-11-01)
 - **Project picker:**
   - The picker lists only folders from `~/.claude.json` → `projects` that still exist, de-duplicated across `/` and `\` and letter case.

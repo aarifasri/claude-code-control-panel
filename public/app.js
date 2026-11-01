@@ -150,6 +150,11 @@ async function act(item, action) {
         `Uninstall ${item.name}?`,
         `This runs "${item.actions.delete.target}". The plugin's saved data is kept, but this app can't undo the uninstall: you would reinstall it with /plugin in Claude Code.`,
         'Uninstall')
+      : item.kind === 'mcp'
+      ? await confirmDialog(
+        `Remove the ${item.name} MCP server?`,
+        `This runs "${item.actions.delete.target}". A backup of ~/.claude.json is kept in ~/.claude-control-panel/backups, but this app can't add the server back: you would re-add it with "claude mcp add".`,
+        'Remove')
       : await confirmDialog(
         `Move ${item.name} to the trash?`,
         `${item.path} moves to the control panel's trash folder. You can restore it from the Trash tab.`,
@@ -163,6 +168,9 @@ async function act(item, action) {
     const i = state.items.findIndex((x) => x.id === item.id);
     if (body.item && i !== -1) state.items[i] = body.item;
     else if (i !== -1) state.items.splice(i, 1);
+    if (item.kind === 'mcp' && !body.item && state.mcp) state.mcp = state.mcp.filter((x) => x.id !== item.id);
+    // The "All hooks" switch changes the state of every hook: reload the list.
+    if (item.kind === 'hook') state.items = (await getJson(`/api/inventory${viewQuery()}`)).items;
     if (!body.item && state.selectedId === item.id) state.selectedId = null;
     // A plugin change also changes the state of everything inside it: reload the list.
     if (item.kind === 'plugin') state.items = (await getJson(`/api/inventory${viewQuery()}`)).items;
@@ -172,7 +180,7 @@ async function act(item, action) {
       toast([`${item.name} moved to the trash.`, ...body.warnings].join(' '), 'ok', () => restore(body.trashEntry));
       return;
     }
-    const now = body.item ? STATE_LABEL[body.item.state].replace(/^\S+ /, '').toLowerCase() : action === 'delete' ? 'uninstalled' : 'removed';
+    const now = body.item ? STATE_LABEL[body.item.state].replace(/^\S+ /, '').toLowerCase() : item.kind === 'plugin' ? 'uninstalled' : 'removed';
     const parts = [`${item.name} is now ${now}.`, ...body.warnings];
     if (body.backups.length) parts.push(`Backup: ${body.backups.join(', ')}`);
     toast(parts.join(' '), body.warnings.length ? 'warn' : 'ok');
@@ -383,7 +391,7 @@ function renderDetail() {
   const target = action ? item.actions[action].target : null;
   const uninstall = item.actions.delete?.allowed
     ? el('button', { type: 'button', class: 'danger', disabled: state.pendingId ? true : undefined, onclick: () => act(item, 'delete') },
-      item.kind === 'plugin' ? 'Uninstall…' : 'Move to trash…')
+      item.kind === 'plugin' ? 'Uninstall…' : item.kind === 'mcp' ? 'Remove…' : 'Move to trash…')
     : null;
 
   fill($('#detail'),

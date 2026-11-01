@@ -80,7 +80,7 @@ test('a skill and a command with the same name get distinct ids', async () => {
     '.claude/commands/same.md': md({ description: 'command' }),
   });
   const { items } = await buildInventory({ home, cli: fakeCli({ 'plugin list --json': { stdout: '[]' } }) });
-  const ids = items.map((i) => i.id);
+  const ids = items.filter((i) => i.kind === 'skill').map((i) => i.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(ids.sort(), ['command:user:same', 'skill:user:same']);
 });

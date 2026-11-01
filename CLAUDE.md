@@ -67,5 +67,10 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - In project view the target is `<project>/.claude/settings.local.json`, and the `claude` CLI runs with `cwd = project`.
 - The page uses a load-generation counter, so responses from a previously selected project are ignored.
 
+## Hooks and MCP (M8, D-012)
+- `src/services/hooks.ts` produces view-only hook items, plus `hook:master:*`, which carries the `disableAllHooks` switch.
+- MCP remove looks the server up through `configuredMcpItems()` (names from `~/.claude.json`), backs up `~/.claude.json` under the label `claude-json`, then runs `claude mcp remove`.
+- `~/.claude-control-panel/backups` can contain secrets copied from `~/.claude.json`. Never serve it to the browser.
+
 ## Current status
-M0–M7 are done: user view and project view; switch skills, commands, agents and plugins; trash and restore. **Next: M8**, the hooks view, the disable-all-hooks switch, and removing MCP servers.
+M0–M8 are done. **Next: M9**, "Verify with Claude Code", speed, an accessibility pass, and the validation checklist.

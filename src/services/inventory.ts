@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { readAgents, readCommands, readSkills, type FoundComponent } from '../adapters/claudeDir.ts';
 import { listPlugins, type ClaudeCli, type InstalledPlugin } from '../adapters/cli.ts';
 import { readJsonObject } from '../adapters/jsonFile.ts';
+import { hookItems } from './hooks.ts';
 import { agentState, skillState } from '../domain/effective.ts';
 import { itemId, projectHash } from '../domain/ids.ts';
 import { isAllowedSettingsFile, projectLocalSettingsPath, userSettingsPath } from '../domain/paths.ts';
@@ -151,6 +152,7 @@ export async function buildInventory(opts: InventoryOptions): Promise<Inventory>
     items.push(...standaloneItems('project', projectHash(opts.project), projectRoot, layers));
   }
   for (const list of await Promise.all(plugins.map(pluginItems))) items.push(...list);
+  items.push(...(await hookItems(layers, plugins)));
 
   // User view writes ~/.claude/settings.json; project view writes the project's personal
   // settings.local.json, so a change affects only that project (BR-4).

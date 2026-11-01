@@ -16,7 +16,7 @@ Verification commands (from M0 on): `npm test` · `npm run typecheck` · `npm st
 | M5 | Plugin enable/disable/uninstall | ✅ 2026-11-01 |
 | M6 | Trash: delete + restore standalone skills/agents | ✅ 2026-11-01 |
 | M7 | Project scope (picker, project items, local-settings writes, precedence warnings) | ✅ 2026-11-01 |
-| M8 | Hooks view + master switch; MCP remove | ☐ |
+| M8 | Hooks view + master switch; MCP remove | ✅ 2026-11-01 |
 | M9 | "Verify with Claude Code", accessibility pass, validation checklist | ☐ |
 
 ---

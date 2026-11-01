@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { skillEnableValue } from '../../src/domain/effective.ts';
+import { hooksEnableValue, skillEnableValue } from '../../src/domain/effective.ts';
 import { addAgentDeny, removeAgentDeny, setSkillOverride } from '../../src/domain/mutations.ts';
 import { actionsFor, type RuleContext } from '../../src/domain/rules.ts';
 import type { Item, SettingsLayer } from '../../src/domain/types.ts';
@@ -152,6 +152,21 @@ test('plugin: ids that could be read as CLI flags are refused', () => {
     assert.equal(a.disable?.allowed, false, key);
     assert.equal(a.delete?.allowed, false, key);
   }
+});
+
+test('MCP: user scope removable; connectors, team .mcp.json, local outside its project and flag-like names are not', () => {
+  const user = actionsFor(item({ kind: 'mcp', key: 'aws-mcp', scope: 'user' }), ctx([]));
+  assert.deepEqual(user.delete, { allowed: true, target: 'claude mcp remove aws-mcp --scope user' });
+  assert.match((user.disable as { reason: string }).reason, /\/mcp/);
+  assert.match((actionsFor(item({ kind: 'mcp', key: 'Gmail', scope: 'connector', origin: { type: 'connector' } }), ctx([])).delete as { reason: string }).reason, /claude\.ai/);
+  assert.match((actionsFor(item({ kind: 'mcp', key: 'db', scope: 'project' }), ctx([])).delete as { reason: string }).reason, /affect your team/);
+  assert.match((actionsFor(item({ kind: 'mcp', key: 'db', scope: 'local' }), ctx([])).delete as { reason: string }).reason, /Scope picker/);
+  assert.equal(actionsFor(item({ kind: 'mcp', key: '--all', scope: 'user' }), ctx([])).delete?.allowed, false);
+});
+
+test('hooksEnableValue mirrors skillEnableValue', () => {
+  assert.equal(hooksEnableValue([L('user', { disableAllHooks: true }, USER)], USER), undefined);
+  assert.equal(hooksEnableValue([L('user', { disableAllHooks: true }), L('local', { disableAllHooks: true }, 'local.json')], 'local.json'), false);
 });
 
 test('agent names with brackets are refused', () => {
