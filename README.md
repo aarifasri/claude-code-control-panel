@@ -54,3 +54,7 @@ npm run typecheck   # tsc --noEmit
 ```
 
 Design and decisions are in [docs/](docs/). Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [DECISIONS.md](docs/DECISIONS.md).
+
+## License
+
+[MIT](LICENSE)

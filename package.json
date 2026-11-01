@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Local web app to view and manage Claude Code plugins, skills, agents, MCP servers and hooks",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"
