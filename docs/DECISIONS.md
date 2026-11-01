@@ -124,7 +124,7 @@ Short records of decisions and the evidence behind them. Newest first.
 
 ## D-004 · Never spawn `claude` through a shell (2026-11-01)
 - During the spike, `spawn(..., {shell: true})` glued the arguments together as raw text and broke the JSON argument.
-- On this machine, `claude` resolves to `C:\Users\amiru\.local\bin\claude.exe`. There is also an npm `claude.cmd`.
+- On the development machine, `claude` resolves to `%USERPROFILE%\.local\bin\claude.exe`. There is also an npm `claude.cmd`.
 - **Decision:** call it with `execFile`/`spawn` and an argument array, with no shell (NFR-S6).
 - **Fallback:** if `claude` isn't found on PATH, report an error. Don't guess paths.
 
