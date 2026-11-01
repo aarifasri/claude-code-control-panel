@@ -40,5 +40,15 @@ hooks): what each item does, what it costs, and turning items on, off or deletin
 - Their text output is parsed against real samples in `test/fixtures/`. If Claude Code changes the format, recapture the samples and rerun the tests.
 - `~/.claude.json` is only ever read for **names** (MCP scopes, known projects), never values.
 
+## Write path (M3)
+- `src/app.ts` holds the request handler and security checks. `src/server.ts` only starts it.
+- Every POST needs:
+  - an `Origin` header from our own host
+  - `Content-Type: application/json`
+  - the `X-CCP-Token` header, matching the per-run token the server puts in a `<meta>` tag of index.html
+- `src/adapters/settingsFile.ts` → `updateSettingsFile()` is the **only** function that writes settings. Its steps: check the allow-list (`src/domain/paths.ts`), back up the text it read, re-read and retry if the file changed, then write atomically.
+- `ActionLock` allows one action at a time. A second request gets 423.
+- `POST /api/actions` validates the request and looks the item up in a fresh inventory. Executors are added from M4 on.
+
 ## Current status
-M0–M2 are done: a read-only inventory, token costs, and MCP servers with health status. **Next: M3**, the safety core. Nothing writes to your settings until it exists.
+M0–M3 are done. **Next: M4**, switching standalone skills on or off and blocking or unblocking agents.

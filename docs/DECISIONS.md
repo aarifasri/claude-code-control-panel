@@ -2,6 +2,17 @@
 
 Short records of decisions and the evidence behind them. Newest first.
 
+## D-007 · Settings writes: back up what we read, retry if the file changes (2026-11-01)
+- **Found by a test:** the first version copied the file from disk for its backup. When another program (Claude Code) changed the file between our read and our backup, the backup held *their* version rather than the one we were replacing. Backup verification caught it and refused to write, so nothing was lost.
+- **Decision:**
+  - Back up the exact text we read.
+  - Re-read the file just before writing. If it changed, start again on the new content, up to 3 attempts, then give up without writing.
+  - Write to a temp file and rename it into place.
+- **Known limit:**
+  - A tiny window remains between the final re-read and the rename. Closing it fully would need OS-level file locking, which Claude Code doesn't use.
+  - The backup covers it: the user can restore the previous version by hand.
+- Invalid JSON is never overwritten, because the user or Claude Code may be in the middle of editing it.
+
 ## D-006 · Skill identity = folder name; agent identity = frontmatter `name` (2026-11-01)
 **Evidence (probe of Claude Code 2.1.314's `init` event, throwaway project):**
 
